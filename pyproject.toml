@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "openstates"
-version = "6.20.1"
+version = "6.20.6"
 description = "core infrastructure for the openstates project"
 authors = ["James Turk <dev@jamesturk.net>"]
 license = "MIT"
@@ -64,5 +64,5 @@ omit = [
 ]
 
 [build-system]
-requires = ["poetry>=0.12"]
-build-backend = "poetry.masonry.api"
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
