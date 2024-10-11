@@ -4,6 +4,7 @@ import glob
 import json
 import logging
 import typing
+from datetime import datetime, timedelta
 from django.db.models import Q, Model
 from django.db.models.signals import post_save
 from .. import settings
@@ -168,8 +169,12 @@ class BaseImporter:
         if bill_transform_func:
             bill_id = bill_transform_func(bill_id)
 
+        # move the start_date up a bit in case the event is on the last day of a session to compare with end_date
+        date = datetime.fromisoformat(date)
+        new_date = date - timedelta(days=1)
+
         objects = Bill.objects.filter(
-            Q(legislative_session__end_date__gte=date)
+            Q(legislative_session__end_date__gte=new_date)
             | Q(legislative_session__end_date=""),
             legislative_session__start_date__lte=date,
             legislative_session__jurisdiction_id=self.jurisdiction_id,
@@ -536,6 +541,12 @@ class BaseImporter:
 
         # turn spec into DB query
         spec = get_pseudo_id(psuedo_person_id)
+
+        # if chamber is included in pseudo_person_id, use that as org_classification
+        if "chamber" in spec and org_classification is None:
+            org_classification = spec["chamber"]
+            del spec["chamber"]
+
         if list(spec.keys()) == ["name"]:
             # if we're just resolving on name, include other names and family name
             name = spec["name"]
@@ -577,14 +588,20 @@ class BaseImporter:
                 memberships__start_date__lt=end_date
             )
 
-        ids = set(Person.objects.filter(spec).values_list("id", flat=True))
-        if len(ids) == 1:
-            self.person_cache[cache_key] = ids.pop()
-            errmsg = None
-        elif not ids:
+        query_result = Person.objects.filter(spec).values("id", "current_role")
+        result_set = set([p["id"] for p in query_result])
+        errmsg = None
+        if len(result_set) == 1:
+            self.person_cache[cache_key] = result_set.pop()
+        elif not result_set:
             errmsg = "no people returned for spec"
         else:
-            errmsg = "multiple people returned for spec"
+            # If there are multiple rows returned see we can get the active legislator.
+            ids = set([p["id"] for p in query_result if p["current_role"] is not None])
+            if len(ids) == 1:
+                self.person_cache[cache_key] = ids.pop()
+            else:
+                errmsg = "multiple people returned for spec"
 
         # either raise or log error
         if errmsg:
