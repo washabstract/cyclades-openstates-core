@@ -2,6 +2,7 @@ from .base import BaseModel, Scraper
 from .popolo import Organization
 from .schemas.jurisdiction import schema
 from ..metadata import lookup
+import requests
 
 
 _name_fixes = {
@@ -32,7 +33,10 @@ class State(BaseModel):
     _schema = schema
 
     # schema objects
-    legislative_sessions = []
+    @property
+    def legislative_sessions(self):
+        return self.get_session_list()
+
     extras = {}
 
     # non-db properties
@@ -96,7 +100,12 @@ class State(BaseModel):
             )
 
     def get_session_list(self) -> list[str]:
-        raise NotImplementedError()
+        response = requests.get(self.sessions_url+"/sessions/query", params={"state_name": "California"})
+        if response.status_code == 200:
+            sessions = response.json()
+            return [session["session_name"] for session in sessions]
+        else:
+            return []
 
     _id = jurisdiction_id
 
