@@ -209,7 +209,7 @@ class Scraper(scrapelib.Scraper):
                 # The delay below ensures messages are sent before the script continues
                 # Documentation: https://kafka.apache.org/documentation/#producerconfigs_linger.ms
                 time.sleep(.1)
-                self.info(f"{obj._type} {obj} sent to Kafka.")
+                logging.info(f"{obj._type} {obj} sent to Kafka.")
                 self.kafka_producer.flush()
             elif self.realtime:
                 self.output_file_path = str(upload_file_path)
