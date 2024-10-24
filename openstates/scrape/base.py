@@ -14,7 +14,6 @@ from kafka import KafkaProducer
 
 from .. import utils, settings
 from ..exceptions import ScrapeError, ScrapeValueError, EmptyScrape
-from ..cli.update import kafka_producer 
 
 
 @FormatChecker.cls_checks("uri-blank")
@@ -80,7 +79,7 @@ class Scraper(scrapelib.Scraper):
         strict_validation=True,
         fastmode=False,
         realtime=False,
-        kafka=None,
+        kafka_producer=None, 
         file_archiving_enabled=False,
     ):
         super(Scraper, self).__init__()
@@ -89,7 +88,7 @@ class Scraper(scrapelib.Scraper):
         self.jurisdiction = jurisdiction
         self.datadir = datadir
         self.realtime = realtime
-        self.kafka = kafka
+        self.kafka_producer = kafka_producer
         self.file_archiving_enabled = file_archiving_enabled
 
         # scrapelib setup
