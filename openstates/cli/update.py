@@ -117,7 +117,6 @@ def do_scrape(
         strict_validation=args.strict,
         fastmode=args.fastmode,
         realtime=args.realtime,
-        kafka=args.kafka,
         kafka_producer=kafka_producer,
         file_archiving_enabled=args.archive,
     )
@@ -158,7 +157,6 @@ def do_scrape(
                     strict_validation=args.strict,
                     fastmode=args.fastmode,
                     realtime=args.realtime,
-                    kafka=args.kafka,
                     kafka_producer=kafka_producer,
                     file_archiving_enabled=args.archive,
                 )
@@ -194,7 +192,6 @@ def do_scrape(
                 strict_validation=args.strict,
                 fastmode=args.fastmode,
                 realtime=args.realtime,
-                kafka=args.kafka,
                 kafka_producer=kafka_producer,
                 file_archiving_enabled=args.archive,
             )
