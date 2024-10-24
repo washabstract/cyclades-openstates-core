@@ -14,6 +14,7 @@ from kafka import KafkaProducer
 
 from .. import utils, settings
 from ..exceptions import ScrapeError, ScrapeValueError, EmptyScrape
+from ..cli.update import kafka_producer 
 
 
 @FormatChecker.cls_checks("uri-blank")
@@ -203,34 +204,39 @@ class Scraper(scrapelib.Scraper):
             except ValueError:
                 upload_file_path = file_path
 
-            if self.kafka:
-                # Instantiate Boto3 Kafka Client
-                client = boto3.client('kafka', region_name='us-west-2')
-
-                # Grab Cluster Arn
-                clusters = client.list_clusters()['ClusterInfoList']
-                cluster_arn = None
-                for cluster in clusters:
-                    if cluster['ClusterName'] == self.kafka:
-                        cluster_arn = cluster['ClusterArn']
-                        break
-
-                if cluster_arn is None:
-                    raise ValueError(f"No Kafka cluster found with name: {self.kafka}")
-
-                # Grab Brokers
-                response = client.get_bootstrap_brokers(ClusterArn=cluster_arn)
-                kafka_brokers = response['BootstrapBrokerStringTls']
-
-                # Instantiate KafkaProducer and Send Bill JSON to State Topic
-                producer = KafkaProducer(security_protocol="SSL", bootstrap_servers=kafka_brokers, value_serializer=lambda v: json.dumps(v).encode('utf-8'))
-                producer.send(jurisdiction, obj.as_dict()) # Sending the Bill JSON to a State Topic
-                
-                # Kafka producers use batching to optimize throughput and reduce the load on brokers
-                # The delay below ensures messages are sent before the script continues
-                # Documentation: https://kafka.apache.org/documentation/#producerconfigs_linger.ms
+            # if self.kafka:
+            if self.kafka and kafka_producer:  # Only send to Kafka if Kafka is set
+                jurisdiction_name = self.jurisdiction.name
+                kafka_producer.send(jurisdiction_name, obj.as_dict())
                 time.sleep(.1)
-                producer.flush()
+                kafka_producer.flush()
+                # # Instantiate Boto3 Kafka Client
+                # client = boto3.client('kafka', region_name='us-west-2')
+
+                # # Grab Cluster Arn
+                # clusters = client.list_clusters()['ClusterInfoList']
+                # cluster_arn = None
+                # for cluster in clusters:
+                #     if cluster['ClusterName'] == self.kafka:
+                #         cluster_arn = cluster['ClusterArn']
+                #         break
+
+                # if cluster_arn is None:
+                #     raise ValueError(f"No Kafka cluster found with name: {self.kafka}")
+
+                # # Grab Brokers
+                # response = client.get_bootstrap_brokers(ClusterArn=cluster_arn)
+                # kafka_brokers = response['BootstrapBrokerStringTls']
+
+                # # Instantiate KafkaProducer and Send Bill JSON to State Topic
+                # producer = KafkaProducer(security_protocol="SSL", bootstrap_servers=kafka_brokers, value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+                # producer.send(jurisdiction, obj.as_dict()) # Sending the Bill JSON to a State Topic
+                
+                # # Kafka producers use batching to optimize throughput and reduce the load on brokers
+                # # The delay below ensures messages are sent before the script continues
+                # # Documentation: https://kafka.apache.org/documentation/#producerconfigs_linger.ms
+                # time.sleep(.1)
+                # producer.flush()
             elif self.realtime:
                 self.output_file_path = str(upload_file_path)
 

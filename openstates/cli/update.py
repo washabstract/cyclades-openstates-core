@@ -65,6 +65,28 @@ def get_jurisdiction(module_name: str) -> tuple[State, ModuleType]:
             return obj(), module
     raise CommandError(f"Unable to import State subclass from {module_name}")
 
+kafka_producer = None
+
+def init_kafka_producer(kafka_cluster_name):
+    global kafka_producer
+    if not kafka_producer:
+        client = boto3.client('kafka', region_name='us-west-2')
+        clusters = client.list_clusters()['ClusterInfoList']
+        cluster_arn = next(
+            (cluster['ClusterArn'] for cluster in clusters if cluster['ClusterName'] == kafka_cluster_name),
+            None
+        )
+        if cluster_arn is None:
+            raise ValueError(f"No Kafka cluster found with name: {kafka_cluster_name}")
+        
+        response = client.get_bootstrap_brokers(ClusterArn=cluster_arn)
+        kafka_brokers = response['BootstrapBrokerStringTls']
+
+        kafka_producer = KafkaProducer(
+            security_protocol="SSL",
+            bootstrap_servers=kafka_brokers,
+            value_serializer=lambda v: json.dumps(v, cls=utils.JSONEncoderPlus).encode('utf-8')
+        )
 
 def do_scrape(
     juris: State,
@@ -79,7 +101,11 @@ def do_scrape(
     # clear json from data dir
     for f in glob.glob(datadir + "/*.json"):
         os.remove(f)
-
+    
+    global kafka_producer
+    if args.kafka:
+        init_kafka_producer(args.kafka)
+        
     report = {}
 
     # do jurisdiction
