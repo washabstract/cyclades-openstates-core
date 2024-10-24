@@ -204,12 +204,15 @@ class Scraper(scrapelib.Scraper):
             except ValueError:
                 upload_file_path = file_path
 
+            if self.kafka_producer:  # Send to Kafka only if producer is initialized
+                self.kafka_producer.send(self.jurisdiction.name, obj.as_dict())
+                self.kafka_producer.flush()
             # if self.kafka:
-            if self.kafka and kafka_producer:  # Only send to Kafka if Kafka is set
-                jurisdiction_name = self.jurisdiction.name
-                kafka_producer.send(jurisdiction_name, obj.as_dict())
-                time.sleep(.1)
-                kafka_producer.flush()
+            # if self.kafka and kafka_producer:  # Only send to Kafka if Kafka is set
+            #     jurisdiction_name = self.jurisdiction.name
+            #     kafka_producer.send(jurisdiction_name, obj.as_dict())
+            #     time.sleep(.1)
+            #     kafka_producer.flush()
                 # # Instantiate Boto3 Kafka Client
                 # client = boto3.client('kafka', region_name='us-west-2')
 

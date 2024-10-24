@@ -102,9 +102,9 @@ def do_scrape(
     for f in glob.glob(datadir + "/*.json"):
         os.remove(f)
     
-    global kafka_producer
+    kafka_producer = None
     if args.kafka:
-        init_kafka_producer(args.kafka)
+        kafka_producer = init_kafka_producer(args.kafka) 
         
     report = {}
 
@@ -116,6 +116,7 @@ def do_scrape(
         fastmode=args.fastmode,
         realtime=args.realtime,
         kafka=args.kafka,
+        kafka_producer=kafka_producer,
         file_archiving_enabled=args.archive,
     )
     report["jurisdiction"] = jscraper.do_scrape()
@@ -156,6 +157,7 @@ def do_scrape(
                     fastmode=args.fastmode,
                     realtime=args.realtime,
                     kafka=args.kafka,
+                    kafka_producer=kafka_producer,
                     file_archiving_enabled=args.archive,
                 )
                 partial_report = scraper.do_scrape(**scrape_args, session=session)
@@ -191,6 +193,7 @@ def do_scrape(
                 fastmode=args.fastmode,
                 realtime=args.realtime,
                 kafka=args.kafka,
+                kafka_producer=kafka_producer,
                 file_archiving_enabled=args.archive,
             )
             report[scraper_name] = scraper.do_scrape(**scrape_args)
