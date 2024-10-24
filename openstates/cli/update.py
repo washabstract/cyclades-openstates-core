@@ -14,6 +14,7 @@ import time
 import traceback
 import typing
 from collections import defaultdict
+from kafka import KafkaProducer
 from types import ModuleType
 
 from django.db import transaction  # type: ignore
