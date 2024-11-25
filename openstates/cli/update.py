@@ -628,6 +628,7 @@ def main() -> int:
     if args.kafka:
         logging.info(f"Kafka topic specified: {args.kafka}")
 
+    import pdb; pdb.set_trace()
     juris, module = get_jurisdiction(args.module)
 
     overrides = {}
