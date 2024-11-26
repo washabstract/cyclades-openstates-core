@@ -316,7 +316,6 @@ def do_import(juris: State, args: argparse.Namespace) -> dict[str, typing.Any]:
 
 def check_session_list(juris: State) -> set[str]:
     scraper = type(juris).__name__
-    import pdb; pdb.set_trace()
 
     # if get_session_list is not defined
     if not hasattr(juris, "get_session_list"):
@@ -628,7 +627,6 @@ def main() -> int:
     if args.kafka:
         logging.info(f"Kafka topic specified: {args.kafka}")
 
-    import pdb; pdb.set_trace()
     juris, module = get_jurisdiction(args.module)
 
     overrides = {}
