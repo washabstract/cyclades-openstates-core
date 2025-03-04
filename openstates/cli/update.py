@@ -10,6 +10,7 @@ import json
 import logging
 import logging.config
 import os
+import requests
 import sys
 import time
 import traceback
@@ -333,11 +334,14 @@ def check_session_list(juris: State) -> set[str]:
     active_sessions = set()
     # copy the list to avoid modifying it
     sessions = set(juris.ignored_scraped_sessions)
+    new_cronos_sessions = []
     for session in juris.legislative_sessions:
-        sessions.add(session.get('_scraped_name', session['identifier']))
-        if session.get('active'):
-            active_sessions.add(session.get('identifier'))
-
+        if juris.create_session_in_cronos(session):
+            new_cronos_sessions.append(session)
+        sessions.add(session.get("_scraped_name", session["identifier"]))
+        if session.get("active"):
+            active_sessions.add(session.get("identifier"))
+    logger.info(f"New sessions created in Cronos: {new_cronos_sessions}")
     if not active_sessions:
         raise CommandError(f'No active sessions on {scraper}')
 
