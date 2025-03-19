@@ -22,6 +22,7 @@ SCRAPELIB_VERIFY = verify
 
 CACHE_DIR = os.path.join(os.getcwd(), "_cache")
 SCRAPED_DATA_DIR = os.path.join(os.getcwd(), "_data")
+CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 
 IMPORT_TRANSFORMERS = {
     "bill": {

@@ -104,6 +104,18 @@ class Scraper(scrapelib.Scraper):
 
         # caching
         if settings.CACHE_DIR:
+            self.info(f"Syncing cache from S3 bucket {settings.CACHE_BUCKET}")
+            os.makedirs(settings.CACHE_DIR, exist_ok=True)
+            s3 = boto3.resource('s3')
+            bucket = s3.Bucket(settings.CACHE_BUCKET)
+            for obj in bucket.objects.all():
+                # Create local cache structure if it doesn't exist (within the scrapers directory)
+                local_path = os.path.join(settings.CACHE_DIR, obj.key)
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                if not os.path.exists(local_path):
+                    self.debug(f"Downloading {obj.key} to cache")
+                    bucket.download_file(obj.key, local_path)
+            self.info("Cache sync completed")
             self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
 
         if fastmode:
