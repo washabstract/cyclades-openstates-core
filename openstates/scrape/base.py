@@ -219,26 +219,6 @@ class Scraper(scrapelib.Scraper):
                     upload_file_path = (
                         f'{jurisdiction}/{session}/{identifier}/{upload_file_path[3:]}'
                     )
-                    s3_bucket_directory = (
-                        f'{jurisdiction}/{session}/{identifier}'.upper()
-                    )
-                    s3 = boto3.client('s3')
-                    bucket = settings.S3_BILLS_BUCKET
-
-                    # Check if the s3_bucket_directory exists
-                    result = s3.list_objects_v2(
-                        Bucket=bucket, Prefix=s3_bucket_directory
-                    )
-                    if 'Contents' in result:
-                        logging.info(
-                            f'Directory {s3_bucket_directory} exists in bucket {bucket}. Skipping save.'
-                        )
-                        return ()
-                    else:
-                        logging.info(
-                            f'Directory {s3_bucket_directory} does not exist in bucket {bucket}. Beginning save process'
-                        )
-
                 # All other ancillary JSONs will be routed here (e.g. jurisdiction JSONs)
                 else:
                     upload_file_path = f'{jurisdiction}/{"Jurisdiction_Information"}/{upload_file_path[3:]}'
