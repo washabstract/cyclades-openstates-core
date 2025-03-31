@@ -334,25 +334,21 @@ def check_session_list(juris: State) -> set[str]:
     active_sessions = set()
     # copy the list to avoid modifying it
     sessions = set(juris.ignored_scraped_sessions)
-    new_cronos_sessions = []
     for session in juris.legislative_sessions:
-        if juris.create_session_in_cronos(session):
-            new_cronos_sessions.append(session)
         sessions.add(session.get("_scraped_name", session["identifier"]))
         if session.get("active"):
             active_sessions.add(session.get("identifier"))
-    logger.info(f"New sessions created in Cronos: {new_cronos_sessions}")
     if not active_sessions:
-        raise CommandError(f'No active sessions on {scraper}')
+        raise CommandError(f"No active sessions on {scraper}")
 
     unaccounted_sessions = list(set(scraped_sessions) - sessions)
     if unaccounted_sessions:
         raise CommandError(
             (
-                'Session(s) {sessions} were reported by {scraper}.get_session_list() '
-                'but were not found in {scraper}.legislative_sessions or '
-                '{scraper}.ignored_scraped_sessions.'
-            ).format(sessions=', '.join(unaccounted_sessions), scraper=scraper)
+                "Session(s) {sessions} were reported by {scraper}.get_session_list() "
+                "but were not found in {scraper}.legislative_sessions or "
+                "{scraper}.ignored_scraped_sessions."
+            ).format(sessions=", ".join(unaccounted_sessions), scraper=scraper)
         )
     stats.write_stats(
         [

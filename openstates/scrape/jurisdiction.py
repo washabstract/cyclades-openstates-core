@@ -37,6 +37,7 @@ class State(BaseModel):
     # schema objects
     historical_legislative_sessions = []
     legislative_sessions = []
+    cronos_created_sessions = []
     extras = {}
 
     # non-db properties
@@ -138,27 +139,12 @@ class State(BaseModel):
         """Returns a list of legislative sessions. If opt_for_new is True, it will override the historical sessions with the new ones from cronos. Otherwise,
         any sessions from cronos with the same identifier as the historical ones will not be used.
         """
-        if not opt_for_new:
-            sessions_table = {
-                session["identifier"]: session for session in self.new_sessions
-            }
-            # Now, any historical sessions with the same identifier will be overridden
-            sessions_table.update(
-                {
-                    session["identifier"]: session
-                    for session in self.historical_legislative_sessions
-                }
-            )
-        else:  # Override sessions with the same identifier with the new ones from cronos.
-            sessions_table = {
-                session["identifier"]: session
-                for session in self.historical_legislative_sessions
-            }
-            sessions_table.update(
-                {session["identifier"]: session for session in self.new_sessions}
-            )
-
-        return list(sessions_table.values())
+        missing_sessions = set(session['identifier'] for session in self.new_sessions) - set(session['identifier'] for session in self.historical_legislative_sessions)
+        for session in self.historical_legislative_sessions:
+            # Check if the session is active, and if not, set it to inactive
+            if session["identifier"] in missing_sessions:
+                session = self.create_session_in_cronos(session)
+        return self.new_sessions
 
     def get_organizations(self):
         legislature = Organization(
@@ -195,8 +181,7 @@ class State(BaseModel):
         try:
             session["state_name"] = self.name
             response = requests.post(cronos_endpoint, data=session, timeout=20)
-            response.raise_for_status()
-            return True
+            return response.raise_for_status() == None
         except Exception as e:
             print(f"Failed to send new session data to cronos: {e}")
             return False
