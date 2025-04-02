@@ -439,7 +439,7 @@ def do_update(
             if os.environ.get('ARCHIVE_CACHE_TO_S3') == 'true':
                 try:
                     logger.info(f'Syncing cache directory {settings.CACHE_DIR} to S3 bucket {settings.CACHE_BUCKET}')
-                    subprocess.run(['aws', 's3', 'sync', settings.CACHE_DIR, settings.CACHE_BUCKET+'/'+juris.name ], check=True)
+                    subprocess.run(['aws', 's3', 'sync', settings.CACHE_DIR, settings.CACHE_BUCKET], check=True)
                     logger.info('Cache directory successfully synced to S3.')
                 except subprocess.CalledProcessError as e:
                     logger.error(f'Failed to sync cache directory to S3: {e}')
