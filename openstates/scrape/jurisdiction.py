@@ -139,7 +139,7 @@ class State(BaseModel):
         """Returns a list of legislative sessions. If opt_for_new is True, it will override the historical sessions with the new ones from cronos. Otherwise,
         any sessions from cronos with the same identifier as the historical ones will not be used.
         """
-        missing_sessions = set(session['identifier'] for session in self.new_sessions) - set(session['identifier'] for session in self.historical_legislative_sessions)
+        missing_sessions = set(session['identifier'] for session in self.historical_legislative_sessions) - set(session['identifier'] for session in self.new_sessions)
         for session in self.historical_legislative_sessions:
             # Check if the session is active, and if not, set it to inactive
             if session["identifier"] in missing_sessions:
