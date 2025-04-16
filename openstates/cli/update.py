@@ -336,8 +336,9 @@ def check_session_list(juris: State) -> set[str]:
     sessions = set(juris.ignored_scraped_sessions)
     for session in juris.legislative_sessions:
         sessions.add(session.get("_scraped_name", session["identifier"]))
-        if session.get("active"):
+        if session.get("active") or ("all" in juris.backfill):
             active_sessions.add(session.get("identifier"))
+    active_sessions.update(juris.backfill)
     if not active_sessions:
         raise CommandError(f"No active sessions on {scraper}")
 
@@ -406,6 +407,9 @@ def do_update(
     # modify args in-place so we can pass them around
     if not args.actions:
         args.actions = ALL_ACTIONS
+    
+    if args.backfill:
+        juris.backfill = args.backfill
 
     if 'import' in args.actions:
         init_django()
@@ -603,6 +607,13 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
 
     # kafka mode
     parser.add_argument('--kafka', type=str, help='Enable writes to Kafka (MSK)')
+
+    # backfill mode
+    parser.add_argument(
+        '--backfill',
+        nargs='+',
+        help='backfill mode for specific sessions, e.g. --backfill 2025-2026 2024-2025',
+    )
 
     # Archiving realtime processing JSON files
     parser.add_argument(
