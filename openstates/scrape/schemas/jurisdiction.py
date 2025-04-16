@@ -39,6 +39,12 @@ schema = {
                 },
             },
         },
-        "extras": extras,
+        "backfill": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "extras": extras
     },
 }
