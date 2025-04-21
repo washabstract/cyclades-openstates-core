@@ -217,24 +217,33 @@ class Scraper(scrapelib.Scraper):
 
             # Fastmode S3 cache check: only for bills
             if (
+                self.requests_per_minute == 0 and  # fastmode is on
                 hasattr(obj, 'identifier') and
-                hasattr(obj, 'legislative_session') and
-                getattr(self, 'requests_per_minute', None) == 0  # fastmode
+                hasattr(obj, 'legislative_session')
             ):
-                s3 = boto3.client('s3')
-                bucket = settings.CACHE_BUCKET.replace("s3://", "")
-                try:
-                    response = s3.get_object(Bucket=bucket, Key=upload_file_path)
-                    existing_data = json.load(response['Body'])
+                identifier = obj.identifier
+                session = obj.legislative_session
+                jurisdiction = upload_file_path[:2].upper()
+                s3_key = f"{jurisdiction}/{session}/{identifier}/bill.json"
 
-                    # Compare current and cached
-                    if existing_data == obj_dict:
-                        self.info(f'Skipping unchanged bill {identifier} from {session}')
-                        return  # don't save or upload
+                s3 = boto3.client("s3")
+                bucket = settings.S3_BILLS_BUCKET
+                try:
+                    self.info(f"Checking for existing bill in s3://{bucket}/{s3_key}")
+                    response = s3.get_object(Bucket=bucket, Key=s3_key)
+                    existing_json = json.load(response["Body"])
+
+                    new_json = json.loads(
+                        json.dumps(obj.as_dict(), cls=utils.JSONEncoderPlus, separators=(",", ":"))
+                    )
+
+                    if existing_json == new_json:
+                        self.info(f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}")
+                        return  # Skip saving
                 except s3.exceptions.NoSuchKey:
-                    self.info(f"Bill not found in cache, saving new: {upload_file_path}")
+                    self.info(f"Bill not found in S3, will save: {jurisdiction}/{session}/{identifier}")
                 except Exception as e:
-                    self.warning(f"Unable to compare to cached bill: {e}")
+                    self.warning(f"S3 comparison failed for {identifier}: {e}")
 
             # Kafka or realtime
             if self.kafka:
