@@ -172,88 +172,53 @@ class Scraper(scrapelib.Scraper):
     def save_object(self, obj):
         '''
         Save object to disk as JSON.
-
-        Generally shouldn't be called directly.
+        Skip saving if fastmode is enabled AND the JSON is already in S3 unchanged.
         '''
+        import botocore
+
         clean_whitespace(obj)
         obj.pre_save(self.jurisdiction.jurisdiction_id)
 
         filename = f'{obj._type}_{obj._id}.json'.replace('/', '-')
         self.info(f'save {obj._type} {obj} as {filename}')
 
-        self.debug(
-            json.dumps(
-                OrderedDict(sorted(obj.as_dict().items())),
-                cls=utils.JSONEncoderPlus,
-                indent=4,
-                separators=(',', ': '),
-            )
-        )
+        obj_dict = OrderedDict(sorted(obj.as_dict().items()))
+        obj_data = json.dumps(obj_dict, cls=utils.JSONEncoderPlus, separators=(',', ':'))
 
         self.output_names[obj._type].add(filename)
 
+        # Set up S3 key if this is a bill
+        s3_key = None
+        if self.requests_per_minute == 0:  # fastmode check
+            if hasattr(obj, 'legislative_session') and hasattr(obj, 'identifier'):
+                jurisdiction = self.jurisdiction.abbreviation.upper()
+                session = obj.legislative_session
+                identifier = obj.identifier
+                s3_key = f"{jurisdiction}/{session}/{identifier}/bill.json"
+
+                # Check if bill already exists in S3 and matches
+                s3 = boto3.client('s3')
+                bucket = settings.CACHE_BUCKET.replace("s3://", "")
+                try:
+                    s3_response = s3.get_object(Bucket=bucket, Key=s3_key)
+                    existing_data = s3_response['Body'].read().decode()
+                    if json.loads(existing_data) == json.loads(obj_data):
+                        self.info(f"⏩ Skipping unchanged bill in fastmode: {s3_key}")
+                        return
+                except botocore.exceptions.ClientError as e:
+                    if e.response['Error']['Code'] != "NoSuchKey":
+                        raise  # raise other real errors
+                    self.debug(f"New bill, no match in S3 for {s3_key} — saving")
+
+        # Save to disk (or use handler)
         if self.scrape_output_handler is None:
             file_path = os.path.join(self.datadir, filename)
-
-            try:
-                # Remove redundant prefix and amend file path
-                upload_file_path = file_path[
-                    file_path.index('_data') + len('_data') + 1 :
-                ]
-                jurisdiction = upload_file_path[:2]
-                # Vote events will be routed through this conditional
-                if hasattr(obj, 'motion_text'):
-                    identifier = obj.bill_identifier
-                    logging.info(
-                        f'Saving vote event from bill {identifier}.'
-                    )
-                # Bills will be routed through this conditional
-                elif hasattr(obj, 'legislative_session') and obj.legislative_session:
-                    session = obj.legislative_session
-                    identifier = obj.identifier
-                    upload_file_path = (
-                        f'{jurisdiction}/{session}/{identifier}/{upload_file_path[3:]}'
-                    )
-                # All other ancillary JSONs will be routed here (e.g. jurisdiction JSONs)
-                else:
-                    upload_file_path = f'{jurisdiction}/{"Jurisdiction_Information"}/{upload_file_path[3:]}'
-
-            except ValueError:
-                upload_file_path = file_path
-
-            if self.kafka:  # Send to Kafka only if producer is initialized
-                self.kafka_producer.send(jurisdiction, obj.as_dict())
-                # Kafka producers use batching to optimize throughput and reduce the load on brokers
-                # The delay below ensures messages are sent before the script continues
-                # Documentation: https://kafka.apache.org/documentation/#producerconfigs_linger.ms
-                time.sleep(0.1)
-                logging.info(f'{obj._type} {obj} sent to Kafka.')
-                self.kafka_producer.flush()
-            elif self.realtime:
-                self.output_file_path = str(upload_file_path)
-
-                s3 = boto3.client('s3')
-                bucket = settings.S3_REALTIME_BASE.removeprefix('s3://')
-
-                s3.put_object(
-                    Body=json.dumps(
-                        OrderedDict(sorted(obj.as_dict().items())),
-                        cls=utils.JSONEncoderPlus,
-                        separators=(',', ': '),
-                    ),
-                    Bucket=bucket,
-                    Key=self.output_file_path,
-                )
-
-                self.push_to_queue()
-            else:
-                with open(file_path, 'w') as f:
-                    json.dump(obj.as_dict(), f, cls=utils.JSONEncoderPlus)
-
+            with open(file_path, 'w') as f:
+                f.write(obj_data)
         else:
             self.scrape_output_handler.handle(obj)
 
-        # validate after writing, allows for inspection on failure
+        # Validate
         try:
             obj.validate()
         except ValueError as ve:
@@ -262,9 +227,10 @@ class Scraper(scrapelib.Scraper):
             else:
                 self.warning(ve)
 
-        # after saving and validating, save subordinate objects
+        # Save related objects
         for obj in obj._related:
             self.save_object(obj)
+
 
     def do_scrape(self, **kwargs):
         record = {'objects': defaultdict(int)}
