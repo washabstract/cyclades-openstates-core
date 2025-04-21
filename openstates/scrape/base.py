@@ -172,10 +172,9 @@ class Scraper(scrapelib.Scraper):
     def save_object(self, obj):
         '''
         Save object to disk as JSON.
-        Skip saving if fastmode is enabled AND the JSON is already in S3 unchanged.
-        '''
-        import botocore
 
+        Generally shouldn't be called directly.
+        '''
         clean_whitespace(obj)
         obj.pre_save(self.jurisdiction.jurisdiction_id)
 
@@ -183,42 +182,84 @@ class Scraper(scrapelib.Scraper):
         self.info(f'save {obj._type} {obj} as {filename}')
 
         obj_dict = OrderedDict(sorted(obj.as_dict().items()))
-        obj_data = json.dumps(obj_dict, cls=utils.JSONEncoderPlus, separators=(',', ':'))
+        self.debug(
+            json.dumps(
+                obj_dict,
+                cls=utils.JSONEncoderPlus,
+                indent=4,
+                separators=(',', ': '),
+            )
+        )
 
         self.output_names[obj._type].add(filename)
 
-        # Set up S3 key if this is a bill
-        s3_key = None
-        if self.requests_per_minute == 0:  # fastmode check
-            if hasattr(obj, 'legislative_session') and hasattr(obj, 'identifier'):
-                jurisdiction = self.jurisdiction.abbreviation.upper()
-                session = obj.legislative_session
-                identifier = obj.identifier
-                s3_key = f"{jurisdiction}/{session}/{identifier}/bill.json"
+        if self.scrape_output_handler is None:
+            file_path = os.path.join(self.datadir, filename)
 
-                # Check if bill already exists in S3 and matches
+            try:
+                upload_file_path = file_path[file_path.index('_data') + len('_data') + 1:]
+                jurisdiction = upload_file_path[:2]
+
+                if hasattr(obj, 'motion_text'):
+                    identifier = obj.bill_identifier
+                    logging.info(f'Saving vote event from bill {identifier}.')
+                elif hasattr(obj, 'legislative_session') and obj.legislative_session:
+                    session = obj.legislative_session
+                    identifier = obj.identifier
+                    upload_file_path = (
+                        f'{jurisdiction}/{session}/{identifier}/bill.json'
+                    )
+                else:
+                    upload_file_path = f'{jurisdiction}/Jurisdiction_Information/{upload_file_path[3:]}'
+
+            except ValueError:
+                upload_file_path = file_path
+
+            # Fastmode S3 cache check: only for bills
+            if (
+                hasattr(obj, 'identifier') and
+                hasattr(obj, 'legislative_session') and
+                getattr(self, 'requests_per_minute', None) == 0  # fastmode
+            ):
                 s3 = boto3.client('s3')
                 bucket = settings.CACHE_BUCKET.replace("s3://", "")
                 try:
-                    s3_response = s3.get_object(Bucket=bucket, Key=s3_key)
-                    existing_data = s3_response['Body'].read().decode()
-                    if json.loads(existing_data) == json.loads(obj_data):
-                        self.info(f"⏩ Skipping unchanged bill in fastmode: {s3_key}")
-                        return
-                except botocore.exceptions.ClientError as e:
-                    if e.response['Error']['Code'] != "NoSuchKey":
-                        raise  # raise other real errors
-                    self.debug(f"New bill, no match in S3 for {s3_key} — saving")
+                    response = s3.get_object(Bucket=bucket, Key=upload_file_path)
+                    existing_data = json.load(response['Body'])
 
-        # Save to disk (or use handler)
-        if self.scrape_output_handler is None:
-            file_path = os.path.join(self.datadir, filename)
-            with open(file_path, 'w') as f:
-                f.write(obj_data)
+                    # Compare current and cached
+                    if existing_data == obj_dict:
+                        self.info(f'Skipping unchanged bill {identifier} from {session}')
+                        return  # don't save or upload
+                except s3.exceptions.NoSuchKey:
+                    self.info(f"Bill not found in cache, saving new: {upload_file_path}")
+                except Exception as e:
+                    self.warning(f"Unable to compare to cached bill: {e}")
+
+            # Kafka or realtime
+            if self.kafka:
+                self.kafka_producer.send(jurisdiction, obj_dict)
+                time.sleep(0.1)
+                logging.info(f'{obj._type} {obj} sent to Kafka.')
+                self.kafka_producer.flush()
+            elif self.realtime:
+                self.output_file_path = str(upload_file_path)
+                s3 = boto3.client('s3')
+                bucket = settings.S3_REALTIME_BASE.removeprefix('s3://')
+                s3.put_object(
+                    Body=json.dumps(obj_dict, cls=utils.JSONEncoderPlus, separators=(',', ': ')),
+                    Bucket=bucket,
+                    Key=self.output_file_path,
+                )
+                self.push_to_queue()
+            else:
+                with open(file_path, 'w') as f:
+                    json.dump(obj_dict, f, cls=utils.JSONEncoderPlus)
+
         else:
             self.scrape_output_handler.handle(obj)
 
-        # Validate
+        # Validate after writing
         try:
             obj.validate()
         except ValueError as ve:
@@ -227,9 +268,10 @@ class Scraper(scrapelib.Scraper):
             else:
                 self.warning(ve)
 
-        # Save related objects
+        # Recurse into sub-objects
         for obj in obj._related:
             self.save_object(obj)
+
 
 
     def do_scrape(self, **kwargs):
