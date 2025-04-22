@@ -237,12 +237,12 @@ class Scraper(scrapelib.Scraper):
                         json.dumps(obj.as_dict(), cls=utils.JSONEncoderPlus, separators=(",", ":"))
                     )
 
-                    # Instead of full JSON comparison, compare length of actions list
-                    existing_actions = existing_json.get("actions", [])
-                    new_actions = new_json.get("actions", [])
+                    # UUIDs in JSONs Differ Each Scrape Run
+                    new_json.pop("_id", None)
+                    existing_json.pop("_id", None)
 
-                    if len(existing_actions) == len(new_actions):
-                        self.info(f"Bill actions unchanged — skipping save: {jurisdiction}/{session}/{identifier}")
+                    if existing_json == new_json:
+                        self.info(f"✅ Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}")
                         return  # Skip saving
                 except s3.exceptions.NoSuchKey:
                     self.info(f"Bill not found in S3, will save: {jurisdiction}/{session}/{identifier}")
