@@ -334,8 +334,10 @@ def check_session_list(juris: State) -> set[str]:
     active_sessions = set()
     # copy the list to avoid modifying it
     sessions = set(juris.ignored_scraped_sessions)
+    session_identifiers = set(juris.ignored_scraped_sessions)
     for session in juris.legislative_sessions:
         sessions.add(session.get("_scraped_name", session["identifier"]))
+        session_identifiers.add(session.get("identifier"))
         if session.get("active") or ("all" in juris.backfill):
             active_sessions.add(session.get("identifier"))
     active_sessions.update(juris.backfill)
@@ -344,13 +346,15 @@ def check_session_list(juris: State) -> set[str]:
 
     unaccounted_sessions = list(set(scraped_sessions) - sessions)
     if unaccounted_sessions:
-        raise CommandError(
-            (
-                "Session(s) {sessions} were reported by {scraper}.get_session_list() "
-                "but were not found in {scraper}.legislative_sessions or "
-                "{scraper}.ignored_scraped_sessions."
-            ).format(sessions=", ".join(unaccounted_sessions), scraper=scraper)
-        )
+        unaccounted_sessions_identifiers = list(set(scraped_sessions) - session_identifiers)
+        if unaccounted_sessions_identifiers:
+            raise CommandError(
+                (
+                    "Session(s) {sessions} were reported by {scraper}.get_session_list() "
+                    "but were not found in {scraper}.legislative_sessions or "
+                    "{scraper}.ignored_scraped_sessions."
+                ).format(sessions=", ".join(unaccounted_sessions), scraper=scraper)
+            )
     stats.write_stats(
         [
             {
