@@ -221,6 +221,42 @@ class Scraper(scrapelib.Scraper):
             except ValueError:
                 upload_file_path = file_path
 
+            # Fastmode S3 cache check: only for bills
+            if (
+                self.requests_per_minute == 0 and  # fastmode is on
+                hasattr(obj, 'identifier') and
+                hasattr(obj, 'legislative_session')
+            ):
+                identifier = obj.identifier
+                session = obj.legislative_session
+                jurisdiction = upload_file_path[:2].upper()
+                s3_key = f"{jurisdiction}/{session}/{identifier}/bill.json"
+
+                s3 = boto3.client("s3")
+                bucket = settings.S3_BILLS_BUCKET
+
+                try:
+                    self.info(f"Checking for existing bill in s3://{bucket}/{s3_key}")
+                    response = s3.get_object(Bucket=bucket, Key=s3_key)
+                    existing_json = json.load(response["Body"])
+
+                    new_json = json.loads(
+                        json.dumps(obj.as_dict(), cls=utils.JSONEncoderPlus)
+                    )
+
+                    # UUIDs in JSONs Differ Each Scrape Run
+                    new_json.pop("_id", None)
+                    existing_json.pop("_id", None)
+
+                    if existing_json == new_json:
+                        self.info(f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}")
+                        return  # Skip saving
+                except s3.exceptions.NoSuchKey:
+                    self.info(f"Bill not found in S3, saving: {jurisdiction}/{session}/{identifier}")
+                except Exception as e:
+                    self.warning(f"S3 comparison failed for {identifier}: {e}")
+
+
             if self.kafka:  # Send to Kafka only if producer is initialized
                 self.kafka_producer.send(jurisdiction, obj.as_dict())
                 # Kafka producers use batching to optimize throughput and reduce the load on brokers
