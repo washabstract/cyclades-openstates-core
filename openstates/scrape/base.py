@@ -221,7 +221,7 @@ class Scraper(scrapelib.Scraper):
             except ValueError:
                 upload_file_path = file_path
 
-            # Fastmode S3 cache check: only for bills
+            # Fastmode S3 cache check
             if (
                 self.requests_per_minute == 0 and  # fastmode is on
                 hasattr(obj, 'identifier') and
@@ -244,7 +244,7 @@ class Scraper(scrapelib.Scraper):
                         json.dumps(obj.as_dict(), cls=utils.JSONEncoderPlus)
                     )
 
-                    # UUIDs in JSONs Differ Each Scrape Run
+                    # UUIDs in JSONs Differ Each Scrape Run, Removing So We Don't Compare
                     new_json.pop("_id", None)
                     existing_json.pop("_id", None)
 
