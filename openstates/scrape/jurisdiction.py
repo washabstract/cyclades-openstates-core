@@ -39,7 +39,6 @@ class State(BaseModel):
     legislative_sessions = []
     cronos_created_sessions = []
     extras = {}
-    backfill = []
 
     # non-db properties
     scrapers = {}
@@ -126,7 +125,7 @@ class State(BaseModel):
                         "name",
                         "start_date",
                         "end_date",
-                        "_scraped_name"
+                        "_scraped_name",
                     ]
                 }
             )
@@ -136,16 +135,36 @@ class State(BaseModel):
         return sessions
 
     @property
-    def legislative_sessions(self, opt_for_new: bool = True):
+    def legislative_sessions(self):
         """Returns a list of legislative sessions. If opt_for_new is True, it will override the historical sessions with the new ones from cronos. Otherwise,
         any sessions from cronos with the same identifier as the historical ones will not be used.
         """
-        missing_sessions = set(session['identifier'] for session in self.historical_legislative_sessions) - set(session['identifier'] for session in self.new_sessions)
-        for session in self.historical_legislative_sessions:
+        missing_sessions = set(
+            session["identifier"] for session in self.historical_legislative_sessions
+        ) - set(session["identifier"] for session in self.new_sessions)
+        cronos_sessions_map = {
+            session["identifier"]: session for session in self.new_sessions
+        }
+        historical_sessions_map = {
+            session["identifier"]: session
+            for session in self.historical_legislative_sessions
+        }
+
+        for session in historical_sessions_map.keys():
             # Check if the session is active, and if not, set it to inactive
-            if session["identifier"] in missing_sessions:
-                session = self.create_session_in_cronos(session)
-        return self.new_sessions
+            if session in missing_sessions:
+                session = self.create_session_in_cronos(
+                    historical_sessions_map[session]
+                )
+
+            # For any values in the historical sessions that are not in the cronos sessions, we need to add them to what we're about to return
+            for key in set(historical_sessions_map[session].keys()) - set(
+                cronos_sessions_map[session].keys()
+            ):
+                cronos_sessions_map[session][key] = historical_sessions_map[session][
+                    key
+                ]
+        return list(cronos_sessions_map.values())
 
     def get_organizations(self):
         legislature = Organization(
