@@ -38,6 +38,7 @@ class State(BaseModel):
     historical_legislative_sessions = []
     legislative_sessions = []
     cronos_created_sessions = []
+    backfill = []
     extras = {}
 
     # non-db properties
