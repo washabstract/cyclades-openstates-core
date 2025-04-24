@@ -237,20 +237,14 @@ class Scraper(scrapelib.Scraper):
 
                 try:
                     self.info(f"Checking for existing bill in s3://{bucket}/{s3_key}")
-                    response = s3.get_object(Bucket=bucket, Key=s3_key)
-                    existing_json = json.load(response["Body"])
-
-                    new_json = json.loads(
-                        json.dumps(obj.as_dict(), cls=utils.JSONEncoderPlus)
-                    )
-
-                    # UUIDs in JSONs Differ Each Scrape Run, Removing So We Don't Compare
-                    new_json.pop("_id", None)
-                    existing_json.pop("_id", None)
-
-                    if existing_json == new_json:
-                        self.info(f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}")
-                        return  # Skip saving
+                    cached = self.bill_cache.get((session, identifier))
+                    if cached:
+                        new_json = obj.as_dict()
+                        new_json.pop("_id", None)
+                        cached.pop("_id", None)
+                        if cached == new_json:
+                            self.info(f"Skipping unchanged bill: {jurisdiction}/{session}/{identifier}")
+                            return
                 except s3.exceptions.NoSuchKey:
                     self.info(f"Bill not found in S3, saving: {jurisdiction}/{session}/{identifier}")
                 except Exception as e:

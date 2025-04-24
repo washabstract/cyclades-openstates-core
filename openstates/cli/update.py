@@ -98,6 +98,39 @@ def init_kafka_producer(kafka_cluster_name: str) -> KafkaProducer:
 
     return producer
 
+def save_bill_cache(scraper, juris: str, sessions: set[str]):
+    """
+    Pull all bill.json files from S3 for the given jurisdiction and sessions.
+    Stores them in memory as a dict: {(session, identifier): bill_dict}
+    """
+    s3 = boto3.client("s3")
+    bucket = settings.S3_BILLS_BUCKET
+
+    scraper.bill_cache = {}
+
+    for session in sessions:
+        prefix = f"{juris.upper()}/{session}/"
+        paginator = s3.get_paginator("list_objects_v2")
+        pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
+
+        for page in pages:
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith("bill.json"):
+                    try:
+                        response = s3.get_object(Bucket=bucket, Key=key)
+                        bill_json = json.load(response["Body"])
+                        
+                        # Parse identifier from key like NC/2023/HB 12/bill.json
+                        parts = key.split("/")
+                        if len(parts) >= 3:
+                            session = parts[1]
+                            identifier = parts[2]
+                            scraper.bill_cache[(session, identifier)] = bill_json
+
+                    except Exception as e:
+                        scraper.warning(f"Could not pull {key} from S3: {e}")
+
 
 def do_scrape(
     juris: State,
@@ -138,6 +171,9 @@ def do_scrape(
             }
         ]
     )
+
+    if args.fastmode:
+        save_bill_cache(jscraper, jscraper.jurisdiction.name, active_sessions)
 
     last_scrape_end_datetime = datetime.datetime.utcnow()
     for scraper_name, scrape_args in scrapers.items():
