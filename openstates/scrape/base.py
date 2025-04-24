@@ -237,13 +237,16 @@ class Scraper(scrapelib.Scraper):
 
                 try:
                     self.info(f"Checking for existing bill in s3://{bucket}/{s3_key}")
-                    cached = self.bill_cache.get((session, identifier))
-                    if cached:
+                    local_path = f"/tmp/bill_cache/{jurisdiction}/{session}/{identifier}/bill.json"
+                    if os.path.exists(local_path):
+                        with open(local_path) as f:
+                            existing_json = json.load(f)
                         new_json = obj.as_dict()
                         new_json.pop("_id", None)
-                        cached.pop("_id", None)
-                        if cached == new_json:
-                            self.info(f"Skipping unchanged bill: {jurisdiction}/{session}/{identifier}")
+                        existing_json.pop("_id", None)
+
+                        if existing_json == new_json:
+                            self.info(f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}")
                             return
                 except s3.exceptions.NoSuchKey:
                     self.info(f"Bill not found in S3, saving: {jurisdiction}/{session}/{identifier}")
