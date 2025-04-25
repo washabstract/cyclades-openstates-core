@@ -1,10 +1,11 @@
-name: Update srapers dependencies
+name: Update scrapers dependencies
 
 on:
   push:
     branches:
       - main
 
+jobs:
   sync_reqs:
     if: github.ref == 'refs/heads/main'
     name: Sync poetry lock with new cyclades-openstates-core version
