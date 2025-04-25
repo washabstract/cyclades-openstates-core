@@ -236,7 +236,7 @@ class Scraper(scrapelib.Scraper):
                 bucket = settings.S3_BILLS_BUCKET
 
                 try:
-                    self.info(f"Checking for existing bill in s3://{bucket}/{s3_key}")
+                    self.info(f"Checking for existing {identifier} in bill cache")
                     local_path = f"/tmp/bill_cache/{jurisdiction}/{session}/{identifier}/bill.json"
                     if os.path.exists(local_path):
                         with open(local_path) as f:
@@ -245,7 +245,8 @@ class Scraper(scrapelib.Scraper):
                         new_json.pop("_id", None)
                         existing_json.pop("_id", None)
 
-                        if existing_json == new_json:
+                        if (json.loads(json.dumps(existing_json, cls=utils.JSONEncoderPlus)) ==
+                            json.loads(json.dumps(new_json, cls=utils.JSONEncoderPlus))):
                             self.info(f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}")
                             return
                 except s3.exceptions.NoSuchKey:
