@@ -7,8 +7,7 @@ on:
 
   sync_reqs:
     if: github.ref == 'refs/heads/main'
-    needs: build
-    name: Sync DAG with New Image Tag
+    name: Sync poetry lock with new cyclades-openstates-core version
     runs-on: ubuntu-latest
 
     steps:
