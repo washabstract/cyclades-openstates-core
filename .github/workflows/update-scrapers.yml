@@ -1,0 +1,71 @@
+name: Update srapers dependencies
+
+on:
+  push:
+    branches:
+      - main
+
+  sync_reqs:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    name: Sync DAG with New Image Tag
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Get GitHub App Token
+        uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+          owner: "washabstract"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          repository: "washabstract/cyclades-openstates-scrapers"
+          token: ${{ steps.app-token.outputs.token }}
+          ref: main
+
+      - name: install poetry
+        run: pip install poetry==1.8.4 wheel
+
+      - name: update poetry lock
+        run: poetry lock
+
+      - name: Configure git
+        run: |
+          git config --global user.name "send-pr.yml workflow"
+          git config --global user.email "<>"
+
+      - name: Checkout new branch
+        run: git checkout -b update-core-dependency-${GITHUB_SHA}
+
+      - name: Commit the changes
+        run: git commit poetry.lock -m "Update CYCLADES_IMAGE_TAG to ${GITHUB_SHA}"
+
+      - name: Push branch
+        run: git push --force origin update-core-dependency-${GITHUB_SHA}:update-core-dependency-${GITHUB_SHA}
+
+      - name: Open PR
+        uses: jwalton/gh-find-current-pr@v1
+        id: findPr
+        with:
+          state: all
+
+      - name: Echo PR
+        run: |
+          gh pr create \
+          --base main \
+          --head update-image-tag-${GITHUB_SHA} \
+          --body "Changes from PR https://github.com/washabstract/cyclades-openstates-core/pull/${PR}" \
+          --title "Update core dependencies"
+        if: success() && steps.findPr.outputs.number
+        env:
+          PR: ${{ steps.findPr.outputs.pr }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
