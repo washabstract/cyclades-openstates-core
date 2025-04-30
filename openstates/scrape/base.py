@@ -256,7 +256,7 @@ class Scraper(scrapelib.Scraper):
 
 
             if self.kafka:  # Send to Kafka only if producer is initialized
-                self.kafka_producer.send(jurisdiction, obj.as_dict())
+                self.kafka_producer.send(jurisdiction.lower(), obj.as_dict())
                 # Kafka producers use batching to optimize throughput and reduce the load on brokers
                 # The delay below ensures messages are sent before the script continues
                 # Documentation: https://kafka.apache.org/documentation/#producerconfigs_linger.ms
