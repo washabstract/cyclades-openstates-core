@@ -47,7 +47,7 @@ jobs:
         run: git checkout -b update-core-dependency-${GITHUB_SHA}
 
       - name: Commit the changes
-        run: git commit poetry.lock -m "Update CYCLADES_IMAGE_TAG to ${GITHUB_SHA}"
+        run: git commit poetry.lock -m "Update Poetry.lock to ${GITHUB_SHA}"
 
       - name: Push branch
         run: git push --force origin update-core-dependency-${GITHUB_SHA}:update-core-dependency-${GITHUB_SHA}
@@ -62,7 +62,7 @@ jobs:
         run: |
           gh pr create \
           --base main \
-          --head update-image-tag-${GITHUB_SHA} \
+          --head update-core-dependency-${GITHUB_SHA} \
           --body "Changes from PR https://github.com/washabstract/cyclades-openstates-core/pull/${PR}" \
           --title "Update core dependencies"
         if: success() && steps.findPr.outputs.number
