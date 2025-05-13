@@ -1,10 +1,6 @@
 [tool.poetry]
-name = "cyclades"
-version = "6.21.6"
-packages = [
-    { include = "openstates" },
-    { include = "openstates/**/*.py" }
-]
+name = "openstates"
+version = "6.22.2"
 description = "core infrastructure for the openstates project"
 authors = ["James Turk <dev@jamesturk.net>"]
 license = "MIT"

@@ -1,5 +1,18 @@
 # Changelog
 
+## 6.22.2 - Apr 25, 2025
+* Bug fix due to metadata error during import
+
+## 6.22.1 - Apr 24, 2025
+* Add Forward Party as a political party option
+* Update PR senate to 28 seats incl 12 at-large
+* Update PR senate to 53 seats incl 13 at-large
+* Update ND house district to merge 9A and 9B into district 9
+* Stop restricting multiple capitol offices
+
+## 6.22.0 - Apr 22, 2025
+* Add metadata to scraper output
+
 ## 6.21.6 - Apr 21, 2025
 * Add informal passage to bill action classification
 
