@@ -154,9 +154,10 @@ class State(BaseModel):
         for session in historical_sessions_map.keys():
             # Check if the session is active, and if not, set it to inactive
             if session in missing_sessions:
-                session = self.create_session_in_cronos(
+                new_created_session = self.create_session_in_cronos(
                     historical_sessions_map[session]
-                )
+                )['session']
+                cronos_sessions_map[new_created_session["identifier"]] = new_created_session
 
             # For any values in the historical sessions that are not in the cronos sessions, we need to add them to what we're about to return
             for key in set(historical_sessions_map[session].keys()) - set(
@@ -202,7 +203,13 @@ class State(BaseModel):
         try:
             session["state_name"] = self.name
             response = requests.post(cronos_endpoint, data=session, timeout=20)
-            return response.raise_for_status() == None
+            response.raise_for_status()
+            if response.status_code == 200:
+                return {'success': response.ok, 'session': response.json()['session']}
+            else:
+                raise requests.RequestException(
+                    f"Failed to create session in cronos: {response.status_code}"
+                )
         except Exception as e:
             print(f"Failed to send new session data to cronos: {e}")
             return False
