@@ -204,12 +204,7 @@ class State(BaseModel):
             session["state_name"] = self.name
             response = requests.post(cronos_endpoint, data=session, timeout=20)
             response.raise_for_status()
-            if response.status_code == 200:
-                return {'success': response.ok, 'session': response.json()['session']}
-            else:
-                raise requests.RequestException(
-                    f"Failed to create session in cronos: {response.status_code}"
-                )
+            return {'success': response.ok, 'session': response.json().get('session', {})}
         except Exception as e:
             print(f"Failed to send new session data to cronos: {e}")
             return False
