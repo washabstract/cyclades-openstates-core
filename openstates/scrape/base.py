@@ -237,14 +237,16 @@ class Scraper(scrapelib.Scraper):
 
                 try:
                     self.info(f"Checking for existing {identifier} in bill cache")
-                    import pdb; pdb.set_trace()
                     local_path = f"/tmp/bill_cache/{jurisdiction}/{session}/{identifier}/bill.json"
                     if os.path.exists(local_path):
                         with open(local_path) as f:
                             existing_json = json.load(f)
                         new_json = obj.as_dict()
-                        new_json.pop("_id", None)
-                        existing_json.pop("_id", None)
+
+                        for d in (existing_json, new_json):
+                            d.pop("_id", None)
+                            d.pop("jurisdiction", None)
+                            d.pop("scraped_at", None)
 
                         if (json.loads(json.dumps(existing_json, cls=utils.JSONEncoderPlus)) ==
                             json.loads(json.dumps(new_json, cls=utils.JSONEncoderPlus))):
@@ -257,7 +259,10 @@ class Scraper(scrapelib.Scraper):
 
 
             if self.kafka:  # Send to Kafka only if producer is initialized
-                self.kafka_producer.send(jurisdiction.upper(), obj.as_dict())
+                bill_data = obj.as_dict()
+                bill_data.pop("jurisdiction", None)
+                bill_data.pop("scraped_at", None)
+                self.kafka_producer.send(jurisdiction.upper(), bill_data)
                 # Kafka producers use batching to optimize throughput and reduce the load on brokers
                 # The delay below ensures messages are sent before the script continues
                 # Documentation: https://kafka.apache.org/documentation/#producerconfigs_linger.ms
