@@ -237,6 +237,7 @@ class Scraper(scrapelib.Scraper):
 
                 try:
                     self.info(f"Checking for existing {identifier} in bill cache")
+                    import pdb; pdb.set_trace()
                     local_path = f"/tmp/bill_cache/{jurisdiction}/{session}/{identifier}/bill.json"
                     if os.path.exists(local_path):
                         with open(local_path) as f:
