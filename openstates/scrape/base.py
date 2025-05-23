@@ -119,6 +119,9 @@ class Scraper(scrapelib.Scraper):
         if fastmode:
             self.requests_per_minute = 0
             self.cache_write_only = False
+            self.es_client = self.init_elasticsearch_client()
+
+        self.existing_session_bills = None
 
         # validation
         self.strict_validation = strict_validation
@@ -133,10 +136,6 @@ class Scraper(scrapelib.Scraper):
         self.warning = self.logger.warning
         self.error = self.logger.error
         self.critical = self.logger.critical
-
-        # elasticcaching
-        self.es_client = self.init_elasticsearch_client()
-        self.existing_session_bills = None
 
         # caching
         if settings.CACHE_DIR:
@@ -207,6 +206,7 @@ class Scraper(scrapelib.Scraper):
         es_password = os.environ.get("ELASTIC_BASIC_AUTH_PASS", "")
 
         import warnings
+
         warnings.filterwarnings("ignore", category=Warning, module="elasticsearch")
 
         es_client = Elasticsearch(
