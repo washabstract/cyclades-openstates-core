@@ -103,6 +103,7 @@ def save_bill_cache(scraper, juris: str, sessions: set[str]):
     Pull all bill.json files from S3 and save them locally for comparison.
     Directory structure will be /tmp/bill_cache/{JURISDICTION}/{SESSION}/{IDENTIFIER}/bill.json
     """
+    import pdb; pdb.set_trace()
     s3 = boto3.client("s3")
     bucket = settings.S3_BILLS_BUCKET
 
