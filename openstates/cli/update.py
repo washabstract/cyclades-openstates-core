@@ -172,8 +172,7 @@ def do_scrape(
     )
 
     if args.fastmode:
-        logger.info("Saving bill cache from S3")
-        save_bill_cache(jscraper, vars(args)['module'], active_sessions)
+        logger.info("Fastmode is enabled: Bill cache will be used with elasticsearch")
 
     last_scrape_end_datetime = datetime.datetime.utcnow()
     for scraper_name, scrape_args in scrapers.items():
