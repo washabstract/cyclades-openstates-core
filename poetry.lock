@@ -545,6 +545,25 @@ files = [
 ]
 
 [[package]]
+name = "elasticsearch"
+version = "7.0.0"
+description = "Python client for Elasticsearch"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "elasticsearch-7.0.0-py2.py3-none-any.whl", hash = "sha256:c621f2272bb2f000d228dc7016d058a1f90f15babdc938240b9f2d13690222db"},
+    {file = "elasticsearch-7.0.0.tar.gz", hash = "sha256:cf6cf834b6d0172dac5e704c398a11d1917cf61f15d32b79b1ddad4cd673c4b1"},
+]
+
+[package.dependencies]
+urllib3 = ">=1.21.1"
+
+[package.extras]
+develop = ["coverage", "mock", "nose", "nosexcover", "pyaml", "requests (>=2.0.0,<3.0.0)", "sphinx (<1.7)", "sphinx-rtd-theme"]
+requests = ["requests (>=2.4.0,<3.0.0)"]
+
+[[package]]
 name = "et-xmlfile"
 version = "2.0.0"
 description = "An implementation of lxml.xmlfile for the standard library"
@@ -2987,4 +3006,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.9"
-content-hash = "93aa6e087705e257a96f3e439663a3e7a616e9821481751344f2c81ee5244672"
+content-hash = "540229616f14b04dfc7fbfb11350aa3a0a5499413d4bcdd1c5428b58212465ac"
