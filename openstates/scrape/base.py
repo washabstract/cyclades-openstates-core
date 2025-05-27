@@ -347,10 +347,10 @@ class Scraper(scrapelib.Scraper):
                                 f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}"
                             )
                             return
-                except s3.exceptions.NoSuchKey:
-                    self.info(
-                        f"Bill not found in S3, saving: {jurisdiction}/{session}/{identifier}"
-                    )
+                    else:
+                        self.info(
+                            f"Bill not found in elastic, saving: {jurisdiction}/{session}/{identifier}"
+                        )
                 except Exception as e:
                     self.warning(f"S3 comparison failed for {identifier}: {e}")
 
