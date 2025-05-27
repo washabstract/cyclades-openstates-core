@@ -304,7 +304,6 @@ class Scraper(scrapelib.Scraper):
                 identifier = obj.identifier
                 session = obj.legislative_session
                 jurisdiction = upload_file_path[:2].upper()
-                s3_key = f"{jurisdiction}/{session}/{identifier}/bill.json"
 
                 s3 = boto3.client("s3")
                 bucket = settings.S3_BILLS_BUCKET
@@ -328,7 +327,7 @@ class Scraper(scrapelib.Scraper):
                             if new_json[key] != existing_json.get(key)
                         }
 
-                        if mismatched_fields != {"_id", "jurisdiction", "scraped_at"}:
+                        if mismatched_fields - {"_id", "jurisdiction", "scraped_at"}:
                             self.info(
                                 f"Bill changed, saving: {jurisdiction}/{session}/{identifier}"
                             )
