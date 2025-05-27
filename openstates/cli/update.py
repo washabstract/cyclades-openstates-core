@@ -98,39 +98,6 @@ def init_kafka_producer(kafka_cluster_name: str) -> KafkaProducer:
 
     return producer
 
-def save_bill_cache(scraper, juris: str, sessions: set[str]):
-    """
-    Pull all bill.json files from S3 and save them locally for comparison.
-    Directory structure will be /tmp/bill_cache/{JURISDICTION}/{SESSION}/{IDENTIFIER}/bill.json
-    """
-    s3 = boto3.client("s3")
-    bucket = settings.S3_BILLS_BUCKET
-
-    for session in sessions:
-        prefix = f"{juris.upper()}/{session}/"
-        paginator = s3.get_paginator("list_objects_v2")
-        pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
-
-        for page in pages:
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                if key.endswith("bill.json"):
-                    try:
-                        response = s3.get_object(Bucket=bucket, Key=key)
-                        bill_json = json.load(response["Body"])
-
-                        parts = key.split("/")  # e.g., ["NC", "2025", "HB 123", "bill.json"]
-                        if len(parts) >= 4:
-                            juris_dir, session_dir, identifier = parts[:3]
-                            local_dir = f"/tmp/bill_cache/{juris_dir}/{session_dir}/{identifier}"
-                            logger.info(f"Saving to {local_dir}/bill.json")
-                            os.makedirs(local_dir, exist_ok=True)
-                            with open(f"{local_dir}/bill.json", "w") as f:
-                                json.dump(bill_json, f)
-
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch {key} from S3: {e}")
-
 def do_scrape(
     juris: State,
     args: argparse.Namespace,

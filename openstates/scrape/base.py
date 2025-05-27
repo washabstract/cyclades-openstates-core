@@ -11,8 +11,8 @@ import time
 import uuid
 from collections import defaultdict, OrderedDict
 from elasticsearch import Elasticsearch
+from elasticsearch.exceptions import ConnectionError as ESConnectionError
 from jsonschema import Draft3Validator, FormatChecker
-
 from .. import utils, settings
 from ..exceptions import ScrapeError, ScrapeValueError, EmptyScrape
 
@@ -237,6 +237,11 @@ class Scraper(scrapelib.Scraper):
                 }
             else:
                 return None
+        
+        except ESConnectionError as e:
+            # Handle connection errors, such as when the Elasticsearch service is down
+            print(f"Connection error with Elasticsearch. Verify that the credentials are correct and updated: {e}")
+            return None
 
         except Exception as e:
             # Log the error or handle it as appropriate for your application
