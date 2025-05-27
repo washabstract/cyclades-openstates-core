@@ -214,9 +214,9 @@ class Scraper(scrapelib.Scraper):
         )
         return es_client
 
-    def get_elastic_entries(self, bill_json: dict, jurisdiction: str) -> bool:
+    def get_elastic_entries(self, bill_json: dict, jurisdiction: str) -> dict:
         """
-        Check if the bill exists in Elasticsearch.
+        Check if the bill exists in Elasticsearch and return all matching entries.
         """
         session = bill_json.get("legislative_session")
         try:
@@ -226,30 +226,37 @@ class Scraper(scrapelib.Scraper):
             if session:
                 must_clauses.append({"term": {"legislative_session": session}})
 
-            # Query for exact match on jurisdiction, and legislative_session
             query = {
                 "query": {"bool": {"must": must_clauses}},
-                "size": 10000,
+                "size": 10000,  
             }
-
-            response = self.es_client.search(index="cyclades", body=query)
-
-            if response["hits"]["total"]["value"] > 0:
-                return {
-                    hit["_source"]["identifier"]: hit["_source"]
-                    for hit in response["hits"]["hits"]
-                }
-            else:
-                return None
-        
+            
+            response = self.es_client.search(
+                index="cyclades",
+                body=query,
+                scroll='2m'
+            )
+            
+            all_hits = {}
+            scroll_id = response['_scroll_id']
+            
+            for hit in response["hits"]["hits"]:
+                all_hits[hit["_source"]["identifier"]] = hit["_source"]
+            
+            while len(response['hits']['hits']) > 0:
+                response = self.es_client.scroll(scroll_id=scroll_id, scroll='2m')
+                
+                for hit in response["hits"]["hits"]:
+                    all_hits[hit["_source"]["identifier"]] = hit["_source"]
+            
+            self.es_client.clear_scroll(scroll_id=scroll_id)
+            
+            return all_hits if all_hits else None
         except ESConnectionError as e:
-            # Handle connection errors, such as when the Elasticsearch service is down
             print(f"Connection error with Elasticsearch. Verify that the credentials are correct and updated: {e}")
             return None
-
         except Exception as e:
-            # Log the error or handle it as appropriate for your application
-            print(f"Error querying Elasticsearch: {e}")
+            print(f"Error during Elasticsearch scroll: {e}")
             return None
 
     def save_object(self, obj):
