@@ -196,6 +196,12 @@ class Scraper(scrapelib.Scraper):
         es_user = os.environ.get("ELASTIC_BASIC_AUTH_USER", "")
         es_password = os.environ.get("ELASTIC_BASIC_AUTH_PASS", "")
 
+        if not any([es_cloud_id, es_user, es_password]):
+            raise ScrapeError(
+                "Elasticsearch credentials are not set. "
+                "Please set ELASTIC_CLOUD_ID, ELASTIC_BASIC_AUTH_USER, and ELASTIC_BASIC_AUTH_PASS."
+            )
+
         import warnings
 
         warnings.filterwarnings("ignore", category=Warning, module="elasticsearch")
