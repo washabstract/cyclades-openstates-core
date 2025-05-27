@@ -10,13 +10,27 @@ import subprocess
 import time
 import uuid
 from collections import defaultdict, OrderedDict
+from elasticsearch import Elasticsearch
+from elasticsearch.exceptions import ConnectionError as ESConnectionError
 from jsonschema import Draft3Validator, FormatChecker
-
+from warnings import filterwarnings
 from .. import utils, settings
 from ..exceptions import ScrapeError, ScrapeValueError, EmptyScrape
 
 
-@FormatChecker.cls_checks('uri-blank')
+def replace_none_in_dict(bill_json: dict) -> dict:
+    """Recursively convert None values to empty strings in a dictionary"""
+    if isinstance(bill_json, dict):
+        return {key: replace_none_in_dict(value) for key, value in bill_json.items()}
+    elif isinstance(bill_json, list):
+        return [replace_none_in_dict(item) for item in bill_json]
+    elif bill_json is None:
+        return ""
+    else:
+        return bill_json
+
+
+@FormatChecker.cls_checks("uri-blank")
 def uri_blank(value):
     return value == '' or FormatChecker().conforms(value, 'uri')
 
@@ -106,6 +120,9 @@ class Scraper(scrapelib.Scraper):
         if fastmode:
             self.requests_per_minute = 0
             self.cache_write_only = False
+            self.es_client = self.init_elasticsearch_client()
+
+        self.existing_session_bills = None
 
         # validation
         self.strict_validation = strict_validation
@@ -169,6 +186,79 @@ class Scraper(scrapelib.Scraper):
         )
         self.info(f"Message ID: {response['MessageId']}")
 
+    def init_elasticsearch_client(self):
+        """
+        Initialize the Elasticsearch client.
+        """
+        es_cloud_id = os.environ.get(
+            "ELASTIC_CLOUD_ID",
+            "",
+        )
+        es_user = os.environ.get("ELASTIC_BASIC_AUTH_USER", "")
+        es_password = os.environ.get("ELASTIC_BASIC_AUTH_PASS", "")
+
+        if not any([es_cloud_id, es_user, es_password]):
+            raise ScrapeError(
+                "Elasticsearch credentials are not set. "
+                "Please set ELASTIC_CLOUD_ID, ELASTIC_BASIC_AUTH_USER, and ELASTIC_BASIC_AUTH_PASS."
+            )
+        filterwarnings("ignore", category=Warning, module="elasticsearch")
+
+        es_client = Elasticsearch(
+            cloud_id=es_cloud_id,
+            http_auth=(
+                es_user,
+                es_password,
+            ),  # http_auth is used in ES 7.x instead of basic_auth (to match python 3.9 limits)
+            verify_certs=True,
+        )
+        return es_client
+
+    def get_elastic_entries(self, bill_json: dict, jurisdiction: str) -> dict:
+        """
+        Check if the bill exists in Elasticsearch and return all matching entries.
+        """
+        session = bill_json.get("legislative_session")
+        try:
+            must_clauses = []
+            if jurisdiction:
+                must_clauses.append({"term": {"jurisdiction.keyword": jurisdiction}})
+            if session:
+                must_clauses.append({"term": {"legislative_session": session}})
+
+            query = {
+                "query": {"bool": {"must": must_clauses}},
+                "size": 10000,  
+            }
+            
+            response = self.es_client.search(
+                index="cyclades",
+                body=query,
+                scroll='2m'
+            )
+            
+            all_hits = {}
+            scroll_id = response['_scroll_id']
+            
+            for hit in response["hits"]["hits"]:
+                all_hits[hit["_source"]["identifier"]] = hit["_source"]
+            
+            while len(response['hits']['hits']) > 0:
+                response = self.es_client.scroll(scroll_id=scroll_id, scroll='2m')
+                
+                for hit in response["hits"]["hits"]:
+                    all_hits[hit["_source"]["identifier"]] = hit["_source"]
+            
+            self.es_client.clear_scroll(scroll_id=scroll_id)
+            
+            return all_hits if all_hits else None
+        except ESConnectionError as e:
+            print(f"Connection error with Elasticsearch. Verify that the credentials are correct and updated: {e}")
+            return None
+        except Exception as e:
+            print(f"Error during Elasticsearch scroll: {e}")
+            return None
+
     def save_object(self, obj):
         '''
         Save object to disk as JSON.
@@ -230,30 +320,42 @@ class Scraper(scrapelib.Scraper):
                 identifier = obj.identifier
                 session = obj.legislative_session
                 jurisdiction = upload_file_path[:2].upper()
-                s3_key = f"{jurisdiction}/{session}/{identifier}/bill.json"
 
                 s3 = boto3.client("s3")
                 bucket = settings.S3_BILLS_BUCKET
 
                 try:
                     self.info(f"Checking for existing {identifier} in bill cache")
-                    local_path = f"/tmp/bill_cache/{jurisdiction}/{session}/{identifier}/bill.json"
-                    if os.path.exists(local_path):
-                        with open(local_path) as f:
-                            existing_json = json.load(f)
-                        new_json = obj.as_dict()
+                    new_json = obj.as_dict()
 
-                        for d in (existing_json, new_json):
-                            d.pop("_id", None)
-                            d.pop("jurisdiction", None)
-                            d.pop("scraped_at", None)
+                    if self.existing_session_bills is None:
+                        self.existing_session_bills = self.get_elastic_entries(
+                            new_json, jurisdiction
+                        )
 
-                        if (json.loads(json.dumps(existing_json, cls=utils.JSONEncoderPlus)) ==
-                            json.loads(json.dumps(new_json, cls=utils.JSONEncoderPlus))):
-                            self.info(f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}")
+                    if existing_json := self.existing_session_bills.get(identifier):
+                        new_json = replace_none_in_dict(new_json)
+                        existing_json = replace_none_in_dict(existing_json)
+
+                        mismatched_fields = {
+                            key
+                            for key in new_json.keys()
+                            if new_json[key] != existing_json.get(key)
+                        }
+
+                        if mismatched_fields - {"_id", "jurisdiction", "scraped_at"}:
+                            self.info(
+                                f"Bill changed, saving: {jurisdiction}/{session}/{identifier}"
+                            )
+                        else:
+                            self.info(
+                                f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}"
+                            )
                             return
-                except s3.exceptions.NoSuchKey:
-                    self.info(f"Bill not found in S3, saving: {jurisdiction}/{session}/{identifier}")
+                    else:
+                        self.info(
+                            f"Bill not found in elastic, saving: {jurisdiction}/{session}/{identifier}"
+                        )
                 except Exception as e:
                     self.warning(f"S3 comparison failed for {identifier}: {e}")
 
