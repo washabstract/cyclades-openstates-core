@@ -13,6 +13,7 @@ from collections import defaultdict, OrderedDict
 from elasticsearch import Elasticsearch
 from elasticsearch.exceptions import ConnectionError as ESConnectionError
 from jsonschema import Draft3Validator, FormatChecker
+from warnings import filterwarnings
 from .. import utils, settings
 from ..exceptions import ScrapeError, ScrapeValueError, EmptyScrape
 
@@ -201,10 +202,7 @@ class Scraper(scrapelib.Scraper):
                 "Elasticsearch credentials are not set. "
                 "Please set ELASTIC_CLOUD_ID, ELASTIC_BASIC_AUTH_USER, and ELASTIC_BASIC_AUTH_PASS."
             )
-
-        import warnings
-
-        warnings.filterwarnings("ignore", category=Warning, module="elasticsearch")
+        filterwarnings("ignore", category=Warning, module="elasticsearch")
 
         es_client = Elasticsearch(
             cloud_id=es_cloud_id,
