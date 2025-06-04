@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.23.0 - May 21, 2025
+* Introduces --http-resilience flag for the os-update command which runs a scraper with techniques to avoid getting
+  disconnected from a source server.
+
+## 6.22.3 - May 14, 2025
+* Use DAG run start time for archiving scrape output
+
 ## 6.22.2 - Apr 25, 2025
 * Bug fix due to metadata error during import
 
