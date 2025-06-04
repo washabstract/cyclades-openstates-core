@@ -34,9 +34,10 @@ stats = Instrumentation()
 ALL_ACTIONS = ('scrape', 'import')
 
 # Settings to archive scraped out put to GCP Cloud Storage
-GCP_PROJECT = os.environ.get('GCP_PROJECT', None)
-BUCKET_NAME = os.environ.get('BUCKET_NAME', None)
-SCRAPE_LAKE_PREFIX = os.environ.get('BUCKET_PREFIX', 'legislation')
+GCP_PROJECT = os.environ.get("GCP_PROJECT", None)
+BUCKET_NAME = os.environ.get("BUCKET_NAME", None)
+SCRAPE_LAKE_PREFIX = os.environ.get("BUCKET_PREFIX", "legislation")
+DAG_RUN_START = os.environ.get("DAG_RUN_START", None)
 
 
 class _Unset:
@@ -126,6 +127,7 @@ def do_scrape(
         kafka=args.kafka,
         kafka_producer=kafka_producer,
         file_archiving_enabled=args.archive,
+        http_resilience_mode=args.http_resilience,
     )
     report['jurisdiction'] = jscraper.do_scrape()
     stats.write_stats(
@@ -138,10 +140,7 @@ def do_scrape(
         ]
     )
 
-    if args.fastmode:
-        logger.info("Fastmode is enabled: Bill cache will be used with elasticsearch")
-
-    last_scrape_end_datetime = datetime.datetime.utcnow()
+    last_scrape_datetime = DAG_RUN_START or datetime.datetime.utcnow().isoformat()
     for scraper_name, scrape_args in scrapers.items():
         ScraperCls = juris.scrapers[scraper_name]
         if (
@@ -170,9 +169,9 @@ def do_scrape(
                     kafka=args.kafka,
                     kafka_producer=kafka_producer,
                     file_archiving_enabled=args.archive,
+                    http_resilience_mode=args.http_resilience,
                 )
                 partial_report = scraper.do_scrape(**scrape_args, session=session)
-                last_scrape_end_datetime = partial_report['end']
                 stats.write_stats(
                     [
                         {
@@ -206,10 +205,10 @@ def do_scrape(
                 kafka=args.kafka,
                 kafka_producer=kafka_producer,
                 file_archiving_enabled=args.archive,
+                http_resilience_mode=args.http_resilience,
             )
             report[scraper_name] = scraper.do_scrape(**scrape_args)
-            last_scrape_end_datetime = report[scraper_name]['end']
-            session = scrape_args.get('session', '')
+            session = scrape_args.get("session", "")
             if session:
                 stats.write_stats(
                     [
@@ -244,13 +243,13 @@ def do_scrape(
     # optionally upload scrape output to cloud storage
     # but do not archive if realtime mode enabled, as realtime mode has its own archiving process
     if args.archive and not args.realtime:
-        archive_to_cloud_storage(datadir, juris, last_scrape_end_datetime)
+        archive_to_cloud_storage(datadir, juris, last_scrape_datetime)
 
     return report
 
 
 def archive_to_cloud_storage(
-    datadir: str, juris: State, last_scrape_end_datetime: datetime.datetime
+    datadir: str, juris: State, last_scrape_datetime: str
 ) -> None:
     # check if we have necessary settings
     if GCP_PROJECT is None or BUCKET_NAME is None:
@@ -267,13 +266,14 @@ def archive_to_cloud_storage(
         f'{SCRAPE_LAKE_PREFIX}/{jurisdiction_id}/{last_scrape_end_datetime.isoformat()}'
     )
 
-    # read files in directory and upload
-    files_count = 0
-    for file_path in glob.glob(datadir + '/*.json'):
-        files_count += 1
-        blob_name = os.path.join(destination_prefx, os.path.basename(file_path))
-        blob = bucket.blob(blob_name)
-        blob.upload_from_filename(file_path)
+    # Catch exceptions so that we do not fail the scrape if transient GCS error occurs
+    try:
+        cloud_storage_client = storage.Client(project=GCP_PROJECT)
+        bucket = cloud_storage_client.bucket(BUCKET_NAME)
+        jurisdiction_id = juris.jurisdiction_id.replace("ocd-jurisdiction/", "")
+        destination_prefix = (
+            f"{SCRAPE_LAKE_PREFIX}/{jurisdiction_id}/{last_scrape_datetime}"
+        )
 
     logger.info(
         f'Completed archive to Google Cloud Storage, {files_count} files were uploaded.'
@@ -606,6 +606,13 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         help='scraper retry wait',
         type=int,
         dest='SCRAPELIB_RETRY_WAIT_SECONDS',
+    )
+
+    # HTTP resilience mode: enable random delays, user agents, more complicated retries
+    parser.add_argument(
+        "--http-resilience",
+        action="store_true",
+        help="enable HTTP resilience mode, defaults to false",
     )
 
     # realtime mode
