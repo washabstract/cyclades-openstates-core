@@ -188,28 +188,21 @@ class Scraper(scrapelib.Scraper):
 
     def init_elasticsearch_client(self):
         """
-        Initialize the Elasticsearch client.
+        Initialize the Elasticsearch client using API key authentication.
         """
-        es_cloud_id = os.environ.get(
-            "ELASTIC_CLOUD_ID",
-            "",
-        )
-        es_user = os.environ.get("ELASTIC_BASIC_AUTH_USER", "")
-        es_password = os.environ.get("ELASTIC_BASIC_AUTH_PASS", "")
+        es_cloud_id = os.environ.get("ELASTIC_CLOUD_ID", "")
+        es_api_key = os.environ.get("ELASTIC_API_KEY", "")
 
-        if not any([es_cloud_id, es_user, es_password]):
+        if not all([es_cloud_id, es_api_key]):
             raise ScrapeError(
-                "Elasticsearch credentials are not set. "
-                "Please set ELASTIC_CLOUD_ID, ELASTIC_BASIC_AUTH_USER, and ELASTIC_BASIC_AUTH_PASS."
+                "Elasticsearch configuration is not set. "
+                "Please set ELASTIC_CLOUD_ID and ELASTIC_API_KEY environment variables."
             )
         filterwarnings("ignore", category=Warning, module="elasticsearch")
 
         es_client = Elasticsearch(
             cloud_id=es_cloud_id,
-            http_auth=(
-                es_user,
-                es_password,
-            ),  # http_auth is used in ES 7.x instead of basic_auth (to match python 3.9 limits)
+            api_key=es_api_key,  
             verify_certs=True,
         )
         return es_client
