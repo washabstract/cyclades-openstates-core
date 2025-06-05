@@ -8,6 +8,7 @@ packages = [
 description = "core infrastructure for the openstates project"
 authors = ["James Turk <dev@jamesturk.net>"]
 license = "MIT"
+
 [tool.poetry.scripts]
 os-update = 'openstates.cli.update:main'
 os-initdb = 'openstates.cli.initdb:main'
