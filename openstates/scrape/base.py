@@ -141,12 +141,12 @@ class Scraper(scrapelib.Scraper):
         # caching
         if settings.CACHE_DIR:
             print(settings.CACHE_BUCKET+'/'+self.jurisdiction.name)
-            self.info(f"Syncing cache from S3 bucket {settings.CACHE_BUCKET}")
-            os.makedirs(settings.CACHE_DIR, exist_ok=True)
-            subprocess.run(['aws', 's3', 'sync', settings.CACHE_BUCKET+'/'+self.jurisdiction.name , settings.CACHE_DIR], check=True)
-
-            self.info("Cache sync completed")
-            self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
+            if os.environ.get('SYNC_S3_ARCHIVE', 'false').lower() == 'true':
+                self.info(f"Syncing cache from S3 bucket {settings.CACHE_BUCKET}")
+                os.makedirs(settings.CACHE_DIR, exist_ok=True)
+                subprocess.run(['aws', 's3', 'sync', settings.CACHE_BUCKET+'/'+self.jurisdiction.name , settings.CACHE_DIR], check=True)
+                self.info("Cache sync completed")
+                self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
 
         modname = os.environ.get('SCRAPE_OUTPUT_HANDLER')
         if modname is None:
