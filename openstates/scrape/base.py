@@ -140,12 +140,6 @@ class Scraper(scrapelib.Scraper):
 
         # caching
         if settings.CACHE_DIR:
-            print(settings.CACHE_BUCKET+'/'+self.jurisdiction.name)
-            self.info(f"Syncing cache from S3 bucket {settings.CACHE_BUCKET}")
-            os.makedirs(settings.CACHE_DIR, exist_ok=True)
-            subprocess.run(['aws', 's3', 'sync', settings.CACHE_BUCKET+'/'+self.jurisdiction.name , settings.CACHE_DIR], check=True)
-
-            self.info("Cache sync completed")
             self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
 
         modname = os.environ.get('SCRAPE_OUTPUT_HANDLER')
@@ -224,7 +218,7 @@ class Scraper(scrapelib.Scraper):
             if jurisdiction:
                 must_clauses.append({"term": {"jurisdiction.keyword": jurisdiction}})
             if session:
-                must_clauses.append({"term": {"legislative_session": session}})
+                must_clauses.append({"term": {"legislative_session.keyword": session}})
 
             query = {
                 "query": {"bool": {"must": must_clauses}},
@@ -311,7 +305,7 @@ class Scraper(scrapelib.Scraper):
             except ValueError:
                 upload_file_path = file_path
 
-            # Fastmode S3 cache check
+            # Fastmode cache check
             if (
                 self.requests_per_minute == 0 and  # fastmode is on
                 hasattr(obj, 'identifier') and
@@ -320,6 +314,9 @@ class Scraper(scrapelib.Scraper):
                 identifier = obj.identifier
                 session = obj.legislative_session
                 jurisdiction = upload_file_path[:2].upper()
+
+                if identifier == "S3001":
+                    self.info('halal 2')
 
                 s3 = boto3.client("s3")
                 bucket = settings.S3_BILLS_BUCKET

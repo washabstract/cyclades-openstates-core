@@ -140,7 +140,13 @@ def do_scrape(
 
     if args.fastmode:
         logger.info("Fastmode is enabled: Bill cache will be used with elasticsearch")
-
+        if os.environ.get('ARCHIVE_CACHE_TO_S3') == 'true':
+            try:
+                logger.info(f'Syncing cache directory {settings.CACHE_DIR} to S3 bucket {settings.CACHE_BUCKET}')
+                subprocess.run(['aws', 's3', 'sync', settings.CACHE_DIR, settings.CACHE_BUCKET+'/'+juris.name], check=True)
+                logger.info('Cache directory successfully synced to S3.')
+            except subprocess.CalledProcessError as e:
+                logger.error(f'Failed to sync cache directory to S3: {e}')
     last_scrape_end_datetime = datetime.datetime.utcnow()
     for scraper_name, scrape_args in scrapers.items():
         ScraperCls = juris.scrapers[scraper_name]
@@ -446,13 +452,7 @@ def do_update(
                 ]
             )
             # Archive cache directory to S3 if enabled
-            if os.environ.get('ARCHIVE_CACHE_TO_S3') == 'true':
-                try:
-                    logger.info(f'Syncing cache directory {settings.CACHE_DIR} to S3 bucket {settings.CACHE_BUCKET}')
-                    subprocess.run(['aws', 's3', 'sync', settings.CACHE_DIR, settings.CACHE_BUCKET+'/'+juris.name], check=True)
-                    logger.info('Cache directory successfully synced to S3.')
-                except subprocess.CalledProcessError as e:
-                    logger.error(f'Failed to sync cache directory to S3: {e}')
+
         # we skip import in realtime mode since this happens via the lambda function
         if 'import' in args.actions and not args.realtime:
             report['import'] = do_import(juris, args)
