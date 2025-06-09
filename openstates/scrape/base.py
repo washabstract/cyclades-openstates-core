@@ -224,7 +224,7 @@ class Scraper(scrapelib.Scraper):
             if jurisdiction:
                 must_clauses.append({"term": {"jurisdiction.keyword": jurisdiction}})
             if session:
-                must_clauses.append({"term": {"legislative_session": session}})
+                must_clauses.append({"term": {"legislative_session.keyword": session}})
 
             query = {
                 "query": {"bool": {"must": must_clauses}},
