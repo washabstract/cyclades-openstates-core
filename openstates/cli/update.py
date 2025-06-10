@@ -445,8 +445,8 @@ def do_update(
                     }
                 ]
             )
-            # Archive cache directory to S3 if enabled
-            if os.environ.get('ARCHIVE_CACHE_TO_S3') == 'true':
+            # Update remote S3 cache if ARCHIVE_CACHE_TO_S3 is set
+            if os.environ.get('ARCHIVE_CACHE_TO_S3', 'false').lower() == 'true':
                 try:
                     logger.info(f'Syncing cache directory {settings.CACHE_DIR} to S3 bucket {settings.CACHE_BUCKET}')
                     subprocess.run(['aws', 's3', 'sync', settings.CACHE_DIR, settings.CACHE_BUCKET+'/'+juris.name], check=True)
