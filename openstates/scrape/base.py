@@ -313,7 +313,7 @@ class Scraper(scrapelib.Scraper):
                 upload_file_path = file_path
                 
             producer = KafkaProducer(
-                    bootstrap_servers='localhost:9092',
+                    bootstrap_servers='host.docker.internal:9092',
                     value_serializer=lambda v: json.dumps(v).encode('utf-8')
                 )
 
