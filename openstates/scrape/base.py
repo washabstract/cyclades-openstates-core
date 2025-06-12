@@ -16,6 +16,7 @@ from jsonschema import Draft3Validator, FormatChecker
 from warnings import filterwarnings
 from .. import utils, settings
 from ..exceptions import ScrapeError, ScrapeValueError, EmptyScrape
+from kafka import KafkaProducer
 
 
 def replace_none_in_dict(bill_json: dict) -> dict:
