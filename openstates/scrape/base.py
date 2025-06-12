@@ -316,14 +316,14 @@ class Scraper(scrapelib.Scraper):
                     value_serializer=lambda v: json.dumps(v).encode('utf-8')
                 )
 
-                bill_data = obj.as_dict()
-                bill_data.pop("jurisdiction", None)
-                bill_data.pop("scraped_at", None)
-                topic = jurisdiction.upper()
+            bill_data = obj.as_dict()
+            bill_data.pop("jurisdiction", None)
+            bill_data.pop("scraped_at", None)
+            topic = jurisdiction.upper()
 
-                producer.send(topic, bill_data)
-                producer.flush()
-                logging.info(f'[TEST BRANCH] Sent bill {obj._id} to Kafka topic {topic}')
+            producer.send(topic, bill_data)
+            producer.flush()
+            logging.info(f'[TEST BRANCH] Sent bill {obj._id} to Kafka topic {topic}')
                 
             # Fastmode S3 cache check
             if (
