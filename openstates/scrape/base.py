@@ -310,7 +310,21 @@ class Scraper(scrapelib.Scraper):
 
             except ValueError:
                 upload_file_path = file_path
+                
+            producer = KafkaProducer(
+                    bootstrap_servers='localhost:9092',
+                    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+                )
 
+                bill_data = obj.as_dict()
+                bill_data.pop("jurisdiction", None)
+                bill_data.pop("scraped_at", None)
+                topic = jurisdiction.upper()
+
+                producer.send(topic, bill_data)
+                producer.flush()
+                logging.info(f'[TEST BRANCH] Sent bill {obj._id} to Kafka topic {topic}')
+                
             # Fastmode S3 cache check
             if (
                 self.requests_per_minute == 0 and  # fastmode is on
