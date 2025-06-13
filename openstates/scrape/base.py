@@ -192,10 +192,10 @@ class Scraper(scrapelib.Scraper):
         """
         es_cloud_id = os.environ.get(
             "ELASTIC_CLOUD_ID",
-            "",
+            None,
         )
-        es_user = os.environ.get("ELASTIC_BASIC_AUTH_USER", "")
-        es_password = os.environ.get("ELASTIC_BASIC_AUTH_PASS", "")
+        es_user = os.environ.get("ELASTIC_BASIC_AUTH_USER", None)
+        es_password = os.environ.get("ELASTIC_BASIC_AUTH_PASS", None)
 
         if not any([es_cloud_id, es_user, es_password]):
             raise ScrapeError(
