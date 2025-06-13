@@ -314,7 +314,7 @@ class Scraper(scrapelib.Scraper):
                 
             producer = KafkaProducer(
                     bootstrap_servers='host.docker.internal:9092',
-                    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+                    value_serializer=lambda v: json.dumps(v, cls=utils.JSONEncoderPlus).encode('utf-8')
                 )
 
             bill_data = obj.as_dict()
