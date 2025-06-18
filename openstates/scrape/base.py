@@ -26,6 +26,8 @@ def replace_none_in_dict(bill_json: dict) -> dict:
         return [replace_none_in_dict(item) for item in bill_json]
     elif bill_json is None:
         return ""
+    elif isinstance(bill_json, datetime.date):
+        return bill_json.strftime('%Y-%m-%d')
     else:
         return bill_json
 
