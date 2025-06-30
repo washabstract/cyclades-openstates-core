@@ -1,5 +1,7 @@
 import boto3  # noqa
 import datetime
+from http.client import RemoteDisconnected
+from google.cloud import storage  # type: ignore
 import importlib
 import json
 import jsonschema
@@ -30,6 +32,11 @@ def replace_none_in_dict(bill_json: dict) -> dict:
         return bill_json.strftime('%Y-%m-%d')
     else:
         return bill_json
+GCP_PROJECT = os.environ.get("GCP_PROJECT", None)
+BUCKET_NAME = os.environ.get("BUCKET_NAME", None)
+SCRAPE_REALTIME_LAKE_PREFIX = os.environ.get(
+    "SCRAPE_REALTIME_LAKE_PREFIX", "legislation/realtime"
+)
 
 
 @FormatChecker.cls_checks("uri-blank")
@@ -98,6 +105,7 @@ class Scraper(scrapelib.Scraper):
         kafka=None,
         kafka_producer=None,
         file_archiving_enabled=False,
+        http_resilience_mode=False,
     ):
         super(Scraper, self).__init__()
 
@@ -118,6 +126,9 @@ class Scraper(scrapelib.Scraper):
 
         # output
         self.output_file_path = None
+        self._realtime_upload_data_classes = settings.REALTIME_UPLOAD_DATA_CLASSES
+        self._upload_interval = 60 * 15  # 15 minutes
+        self._last_upload_time = time.time()
 
         if fastmode:
             self.requests_per_minute = 0
@@ -187,6 +198,60 @@ class Scraper(scrapelib.Scraper):
             MessageBody=message_body,
         )
         self.info(f"Message ID: {response['MessageId']}")
+
+    def _upload_jsonl_to_gcs(self):
+        cloud_storage_client = storage.Client(project=GCP_PROJECT)
+        bucket = cloud_storage_client.bucket(BUCKET_NAME)
+
+        for upload_data_class in self._realtime_upload_data_classes:
+            jsonl_path = os.path.join(self.datadir, f"{upload_data_class}.jsonl")
+            if os.path.exists(jsonl_path) and os.path.getsize(jsonl_path) > 0:
+                now = datetime.datetime.now(datetime.timezone.utc)
+                scrape_year_month = now.strftime("%Y-%m")
+                timestamp = now.isoformat()
+                jurisdiction_id = self.jurisdiction.jurisdiction_id.replace(
+                    "ocd-jurisdiction/", ""
+                )
+                dest_file_path = f"{SCRAPE_REALTIME_LAKE_PREFIX}/{upload_data_class}/{jurisdiction_id}/{scrape_year_month}/{upload_data_class}_{timestamp}.jsonl"
+
+                blob = bucket.blob(dest_file_path)
+                blob.upload_from_filename(jsonl_path)
+                self.logger.info(
+                    f"Uploaded {upload_data_class} to GCS: {dest_file_path}"
+                )
+                # Delete the local file after upload
+                os.remove(jsonl_path)
+
+    def upload_to_gcs_real_time(self, obj=None, force_upload=False):
+        """
+        Save scrape output to object bucket every interval
+        """
+        if GCP_PROJECT is None or BUCKET_NAME is None:
+            self.logger.warning(
+                "Real-time Upload missing necessary settings are missing. No upload was done."
+            )
+            return
+
+        # Attempt to save only when there is an object.
+        if obj:
+            obj_dict = obj.as_dict()
+            upload_data_class = obj._type
+
+            if upload_data_class not in self._realtime_upload_data_classes:
+                raise ScrapeError(
+                    f"Unsupported data class for gcs_real_time_upload {upload_data_class}"
+                )
+                return
+
+            jsonl_path = os.path.join(self.datadir, f"{upload_data_class}.jsonl")
+            with open(jsonl_path, "a") as f:
+                json.dump(obj_dict, f, cls=utils.JSONEncoderPlus)
+                f.write("\n")
+
+        now = time.time()
+        if force_upload or now - self._last_upload_time >= self._upload_interval:
+            self._upload_jsonl_to_gcs()
+            self._last_upload_time = now
 
     def init_elasticsearch_client(self):
         """
@@ -394,6 +459,10 @@ class Scraper(scrapelib.Scraper):
                 with open(file_path, 'w') as f:
                     json.dump(obj.as_dict(), f, cls=utils.JSONEncoderPlus)
 
+            # Periodically push data to GCS by data class
+            if self.realtime:
+                self.upload_to_gcs_real_time(obj)
+
         else:
             self.scrape_output_handler.handle(obj)
 
@@ -449,6 +518,171 @@ class Scraper(scrapelib.Scraper):
         raise NotImplementedError(
             self.__class__.__name__ + ' must provide a scrape() method'
         )
+
+    def request_resiliently(self, request_func):
+        try:
+            # Reset connection pool if needed
+            self._reset_connection_pool_if_needed()
+
+            # Add a random delay between processing items
+            self.add_random_delay(1, 3)
+
+            # If we've had too many consecutive failures, pause for a while
+            if self._consecutive_failures >= self._max_consecutive_failures:
+                self.logger.warning(
+                    f"Circuit breaker triggered after {self._consecutive_failures} consecutive failures. "
+                    f"Pausing for {self._circuit_breaker_timeout} seconds."
+                )
+                time.sleep(self._circuit_breaker_timeout)
+                self._consecutive_failures = 0
+
+                # Rotate user agent after circuit breaker timeout
+                self.headers["User-Agent"] = get_random_user_agent()
+
+            response = self.retry_on_connection_error(
+                request_func,
+                max_retries=3,
+                initial_backoff=10,
+                max_backoff=120,
+            )
+
+            # Reset consecutive failures counter on success
+            self._consecutive_failures = 0
+
+            return response
+        except Exception as e:
+            self._consecutive_failures += 1
+            self.logger.error(f"Error processing item: {e}")
+
+            # If it's a connection error, add a longer delay
+            if isinstance(e, (ConnectionError, RemoteDisconnected)):
+                self.logger.warning("Connection error. Adding longer delay.")
+                self.add_random_delay(
+                    self._random_delay_on_failure_min, self._random_delay_on_failure_max
+                )
+
+                # Rotate user agent after connection error
+                self.headers["User-Agent"] = get_random_user_agent()
+
+    def get(self, url, **kwargs):
+        request_func = lambda: super(Scraper, self).get(url, **kwargs)  # noqa: E731
+        if self.http_resilience_mode:
+            return self.request_resiliently(request_func)
+        else:
+            return super().get(url, **kwargs)
+
+    def post(self, url, data=None, json=None, **kwargs):
+        request_func = lambda: super(Scraper, self).post(url, data=data, json=json**kwargs)  # noqa: E731
+        if self.http_resilience_mode:
+            return self.request_resiliently(request_func)
+        else:
+            return super().post(url, data=data, json=json, **kwargs)
+
+    def retry_on_connection_error(
+        self, func, max_retries=5, initial_backoff=2, max_backoff=60
+    ):
+        """
+        Retry a function call on connection errors with exponential backoff.
+
+        Args:
+            func: Function to call
+            max_retries: Maximum number of retries
+            initial_backoff: Initial backoff time in seconds
+            max_backoff: Maximum backoff time in seconds
+
+        Returns:
+            The result of the function call
+        """
+        retries = 0
+        backoff = initial_backoff
+
+        while True:
+            try:
+                return func()
+            except (
+                ConnectionError,
+                RemoteDisconnected,
+                URLError,
+                requests.exceptions.Timeout,
+                requests.exceptions.RequestException,
+            ) as e:
+                retries += 1
+                if retries > max_retries:
+                    self.logger.error(
+                        f"Max retries ({max_retries}) exceeded. Last error: {e}"
+                    )
+                    raise
+
+                # Calculate backoff with jitter
+                jitter = random.uniform(0.8, 1.2)
+                current_backoff = min(backoff * jitter, max_backoff)
+
+                self.logger.warning(
+                    f"Connection error: {e}. Retrying in {current_backoff:.2f} seconds (attempt {retries}/{max_retries})"
+                )
+                time.sleep(current_backoff)
+
+                # Increase backoff for next retry
+                backoff = min(backoff * 2, max_backoff)
+
+    def _create_fresh_session(self):
+        """
+        Create a fresh session with appropriate settings.
+        """
+        if hasattr(self, "session"):
+            self.session.close()
+
+        # Create a new session
+        self.session = requests.Session()
+
+        # Set any custom headers
+        self.session.headers.update(self.http_resilience_headers)
+
+        # Set up retry mechanism
+        adapter = requests.adapters.HTTPAdapter(
+            max_retries=self.retry_attempts,
+            pool_connections=10,
+            pool_maxsize=10,
+            pool_block=False,
+        )
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
+        self.headers["User-Agent"] = get_random_user_agent()
+
+        self.logger.info(
+            f"Created fresh session with user agent: {self.headers['User-Agent']}"
+        )
+
+        return self.session
+
+    def _reset_connection_pool_if_needed(self):
+        """
+        Reset the connection pool if it's been too long since the last reset.
+        This helps prevent "Remote end closed connection without response" errors.
+        """
+        current_time = time.time()
+        if current_time - self._last_reset_time > self._reset_interval:
+            self.logger.info(
+                f"Resetting connection pool after {self._reset_interval} seconds"
+            )
+
+            # Create a fresh session
+            self._create_fresh_session()
+
+            self._last_reset_time = current_time
+
+    def add_random_delay(self, min_seconds=1, max_seconds=3):
+        """
+        Add a random delay to simulate human behavior.
+
+        Args:
+            min_seconds: Minimum delay in seconds
+            max_seconds: Maximum delay in seconds
+        """
+        delay = random.uniform(min_seconds, max_seconds)
+        self.logger.debug(f"Adding random delay of {delay:.2f} seconds")
+        time.sleep(delay)
 
 
 class BaseBillScraper(Scraper):
