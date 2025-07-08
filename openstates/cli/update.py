@@ -196,6 +196,8 @@ def do_scrape(
                         }
                     ]
                 )
+                if args.realtime:
+                    scraper.upload_to_gcs_real_time(force_upload=True)
         else:
             scraper = ScraperCls(
                 juris,
@@ -208,8 +210,9 @@ def do_scrape(
                 file_archiving_enabled=args.archive,
             )
             report[scraper_name] = scraper.do_scrape(**scrape_args)
-            last_scrape_end_datetime = report[scraper_name]['end']
-            session = scrape_args.get('session', '')
+            session = scrape_args.get("session", "")
+            if args.realtime:
+                scraper.upload_to_gcs_real_time(force_upload=True)
             if session:
                 stats.write_stats(
                     [
@@ -242,9 +245,9 @@ def do_scrape(
                 )
 
     # optionally upload scrape output to cloud storage
-    # but do not archive if realtime mode enabled, as realtime mode has its own archiving process
-    if args.archive and not args.realtime:
-        archive_to_cloud_storage(datadir, juris, last_scrape_end_datetime)
+    # archive and realtime BOTH coexist for now, as we refactor realtime
+    if args.archive:  # and not args.realtime:
+        archive_to_cloud_storage(datadir, juris, last_scrape_datetime)
 
     return report
 
@@ -275,9 +278,23 @@ def archive_to_cloud_storage(
         blob = bucket.blob(blob_name)
         blob.upload_from_filename(file_path)
 
-    logger.info(
-        f'Completed archive to Google Cloud Storage, {files_count} files were uploaded.'
-    )
+        # read files in directory and upload
+        files_count = 0
+        for file_path in glob.glob(datadir + "/*.json"):
+            files_count += 1
+            blob_name = os.path.join(destination_prefix, os.path.basename(file_path))
+            blob = bucket.blob(blob_name)
+            blob.upload_from_filename(file_path)
+
+        logger.info(
+            f"Completed archive to Google Cloud Storage, {files_count} files "
+            f"were uploaded to {destination_prefix}."
+        )
+
+    except Exception as e:
+        logger.warning(
+            f"An error occurred during the attempt to archive files to Google Cloud Storage: {e}"
+        )
 
 
 def do_import(juris: State, args: argparse.Namespace) -> dict[str, typing.Any]:
@@ -302,11 +319,23 @@ def do_import(juris: State, args: argparse.Namespace) -> dict[str, typing.Any]:
         logger.info('import jurisdictions...')
         report.update(juris_importer.import_directory(datadir))
         logger.info("import bills...")
-        report.update(bill_importer.import_directory(datadir, allow_duplicates=args.allow_duplicates))
+        report.update(
+            bill_importer.import_directory(
+                datadir, allow_duplicates=args.allow_duplicates
+            )
+        )
         logger.info("import vote events...")
-        report.update(vote_event_importer.import_directory(datadir, allow_duplicates=args.allow_duplicates))
+        report.update(
+            vote_event_importer.import_directory(
+                datadir, allow_duplicates=args.allow_duplicates
+            )
+        )
         logger.info("import events...")
-        report.update(event_importer.import_directory(datadir, allow_duplicates=args.allow_duplicates))
+        report.update(
+            event_importer.import_directory(
+                datadir, allow_duplicates=args.allow_duplicates
+            )
+        )
         DatabaseJurisdiction.objects.filter(id=juris.jurisdiction_id).update(
             latest_bill_update=datetime.datetime.utcnow()
         )
@@ -445,17 +474,9 @@ def do_update(
                     }
                 ]
             )
-            # Update remote S3 cache if ARCHIVE_CACHE_TO_S3 is set
-            if os.environ.get('ARCHIVE_CACHE_TO_S3', 'false').lower() == 'true':
-                try:
-                    logger.info(f'Syncing cache directory {settings.CACHE_DIR} to S3 bucket {settings.CACHE_BUCKET}')
-                    subprocess.run(['aws', 's3', 'sync', settings.CACHE_DIR, settings.CACHE_BUCKET+'/'+juris.name], check=True)
-                    logger.info('Cache directory successfully synced to S3.')
-                except subprocess.CalledProcessError as e:
-                    logger.error(f'Failed to sync cache directory to S3: {e}')
-        # we skip import in realtime mode since this happens via the lambda function
-        if 'import' in args.actions and not args.realtime:
-            report['import'] = do_import(juris, args)
+        # realtime and normal import coexist for now as we refactor realtime
+        if "import" in args.actions:  # and not args.realtime:
+            report["import"] = do_import(juris, args)
             stats.write_stats(
                 [
                     {
