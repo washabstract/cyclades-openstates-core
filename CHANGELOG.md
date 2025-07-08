@@ -1,5 +1,25 @@
 # Changelog
 
+## 6.24.2 - Jun 24, 2025
+* Change real-time mode to be non-exclusive while we work on refactoring it.
+  The --realtime flag will no longer prevent normal import nor prevent the
+  --archive logic from working.
+
+## 6.24.1 - Jun 22, 2025
+* Update file path for real-time upload. 
+
+## 6.24.0 - Jun 17, 2025
+* Incrementally saving scrape output to GCS, if `--realtime` flag is used.
+  Uses a default interval of 15 minutes to upload a JSONL file by data class.
+  Data classes can be jurisdiction, organization, bill, event, and vote event.
+
+## 6.23.0 - May 21, 2025
+* Introduces --http-resilience flag for the os-update command which runs a scraper with techniques to avoid getting
+  disconnected from a source server.
+
+## 6.22.3 - May 14, 2025
+* Use DAG run start time for archiving scrape output
+
 ## 6.22.2 - Apr 25, 2025
 * Bug fix due to metadata error during import
 
