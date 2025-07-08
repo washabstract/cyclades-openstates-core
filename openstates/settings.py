@@ -27,12 +27,18 @@ CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 IMPORT_TRANSFORMERS = {
     "bill": {
         "identifier": transformers.fix_bill_id,
-        "documents": {"note": transformers.truncate_300},  # TODO remove when db migration done
-        "versions": {"note": transformers.truncate_300},  # TODO remove when db migration done
+        "documents": {
+            "note": transformers.truncate_300
+        },  # TODO remove when db migration done
+        "versions": {
+            "note": transformers.truncate_300
+        },  # TODO remove when db migration done
     },
     "event": {
-        "media": {"note": transformers.truncate_300},  # TODO remove when db migration done
-    }
+        "media": {
+            "note": transformers.truncate_300
+        },  # TODO remove when db migration done
+    },
 }
 
 # Django settings
@@ -59,3 +65,6 @@ LOGGING = {
         "boto": {"handlers": ["default"], "level": "WARN", "propagate": False},
     },
 }
+
+# Realtime Upload
+REALTIME_UPLOAD_DATA_CLASSES = ["bill", "event", "vote_event", "jurisdiction", "organization"]

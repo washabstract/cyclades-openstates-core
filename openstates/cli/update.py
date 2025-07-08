@@ -37,7 +37,7 @@ ALL_ACTIONS = ('scrape', 'import')
 GCP_PROJECT = os.environ.get('GCP_PROJECT', None)
 BUCKET_NAME = os.environ.get('BUCKET_NAME', None)
 SCRAPE_LAKE_PREFIX = os.environ.get('BUCKET_PREFIX', 'legislation')
-
+DAG_RUN_START = os.environ.get("DAG_RUN_START", None)
 
 class _Unset:
     pass
@@ -141,7 +141,7 @@ def do_scrape(
     if args.fastmode:
         logger.info("Fastmode is enabled: Bill cache will be used with elasticsearch")
 
-    last_scrape_end_datetime = datetime.datetime.utcnow()
+    last_scrape_datetime = DAG_RUN_START or datetime.datetime.utcnow().isoformat()
     for scraper_name, scrape_args in scrapers.items():
         ScraperCls = juris.scrapers[scraper_name]
         if (
@@ -172,7 +172,6 @@ def do_scrape(
                     file_archiving_enabled=args.archive,
                 )
                 partial_report = scraper.do_scrape(**scrape_args, session=session)
-                last_scrape_end_datetime = partial_report['end']
                 stats.write_stats(
                     [
                         {
@@ -196,6 +195,8 @@ def do_scrape(
                         }
                     ]
                 )
+                if args.realtime:
+                    scraper.upload_to_gcs_real_time(force_upload=True)
         else:
             scraper = ScraperCls(
                 juris,
@@ -208,8 +209,9 @@ def do_scrape(
                 file_archiving_enabled=args.archive,
             )
             report[scraper_name] = scraper.do_scrape(**scrape_args)
-            last_scrape_end_datetime = report[scraper_name]['end']
-            session = scrape_args.get('session', '')
+            session = scrape_args.get("session", "")
+            if args.realtime:
+                scraper.upload_to_gcs_real_time(force_upload=True)
             if session:
                 stats.write_stats(
                     [
@@ -242,42 +244,52 @@ def do_scrape(
                 )
 
     # optionally upload scrape output to cloud storage
-    # but do not archive if realtime mode enabled, as realtime mode has its own archiving process
-    if args.archive and not args.realtime:
-        archive_to_cloud_storage(datadir, juris, last_scrape_end_datetime)
+    # archive and realtime BOTH coexist for now, as we refactor realtime
+    if args.archive:  # and not args.realtime:
+        archive_to_cloud_storage(datadir, juris, last_scrape_datetime)
 
     return report
 
 
 def archive_to_cloud_storage(
-    datadir: str, juris: State, last_scrape_end_datetime: datetime.datetime
+    datadir: str, juris: State, last_scrape_datetime: str
 ) -> None:
     # check if we have necessary settings
     if GCP_PROJECT is None or BUCKET_NAME is None:
         logger.error(
-            'Scrape archiving is turned on, but necessary settings are missing. No archive was done.'
+            "Scrape archiving is turned on, but necessary settings are missing. No archive was done."
         )
         return
-    logger.info('Beginning archive of scraped files to google cloud storage.')
-    logger.info(f'GCP Project is {GCP_PROJECT} and bucket is {BUCKET_NAME}')
-    cloud_storage_client = storage.Client(project=GCP_PROJECT)
-    bucket = cloud_storage_client.bucket(BUCKET_NAME)
-    jurisdiction_id = juris.jurisdiction_id.replace('ocd-jurisdiction/', '')
-    destination_prefx = (
-        f'{SCRAPE_LAKE_PREFIX}/{jurisdiction_id}/{last_scrape_end_datetime.isoformat()}'
-    )
+    logger.info("Beginning archive of scraped files to google cloud storage.")
+    logger.info(f"GCP Project is {GCP_PROJECT} and bucket is {BUCKET_NAME}")
 
-    # read files in directory and upload
-    files_count = 0
-    for file_path in glob.glob(datadir + '/*.json'):
-        files_count += 1
-        blob_name = os.path.join(destination_prefx, os.path.basename(file_path))
-        blob = bucket.blob(blob_name)
-        blob.upload_from_filename(file_path)
+    # Catch exceptions so that we do not fail the scrape if transient GCS error occurs
+    try:
+        cloud_storage_client = storage.Client(project=GCP_PROJECT)
+        bucket = cloud_storage_client.bucket(BUCKET_NAME)
+        jurisdiction_id = juris.jurisdiction_id.replace("ocd-jurisdiction/", "")
+        destination_prefix = (
+            f"{SCRAPE_LAKE_PREFIX}/{jurisdiction_id}/{last_scrape_datetime}"
+        )
 
-    logger.info(
-        f'Completed archive to Google Cloud Storage, {files_count} files were uploaded.'
-    )
+        # read files in directory and upload
+        files_count = 0
+        for file_path in glob.glob(datadir + "/*.json"):
+            files_count += 1
+            blob_name = os.path.join(destination_prefix, os.path.basename(file_path))
+            blob = bucket.blob(blob_name)
+            blob.upload_from_filename(file_path)
+
+        logger.info(
+            f"Completed archive to Google Cloud Storage, {files_count} files "
+            f"were uploaded to {destination_prefix}."
+        )
+
+    except Exception as e:
+        logger.warning(
+            f"An error occurred during the attempt to archive files to Google Cloud Storage: {e}"
+        )
+
 
 
 def do_import(juris: State, args: argparse.Namespace) -> dict[str, typing.Any]:
@@ -302,11 +314,23 @@ def do_import(juris: State, args: argparse.Namespace) -> dict[str, typing.Any]:
         logger.info('import jurisdictions...')
         report.update(juris_importer.import_directory(datadir))
         logger.info("import bills...")
-        report.update(bill_importer.import_directory(datadir, allow_duplicates=args.allow_duplicates))
+        report.update(
+            bill_importer.import_directory(
+                datadir, allow_duplicates=args.allow_duplicates
+            )
+        )
         logger.info("import vote events...")
-        report.update(vote_event_importer.import_directory(datadir, allow_duplicates=args.allow_duplicates))
+        report.update(
+            vote_event_importer.import_directory(
+                datadir, allow_duplicates=args.allow_duplicates
+            )
+        )
         logger.info("import events...")
-        report.update(event_importer.import_directory(datadir, allow_duplicates=args.allow_duplicates))
+        report.update(
+            event_importer.import_directory(
+                datadir, allow_duplicates=args.allow_duplicates
+            )
+        )
         DatabaseJurisdiction.objects.filter(id=juris.jurisdiction_id).update(
             latest_bill_update=datetime.datetime.utcnow()
         )
@@ -454,8 +478,9 @@ def do_update(
                 except subprocess.CalledProcessError as e:
                     logger.error(f'Failed to sync cache directory to S3: {e}')
         # we skip import in realtime mode since this happens via the lambda function
-        if 'import' in args.actions and not args.realtime:
-            report['import'] = do_import(juris, args)
+        # realtime and normal import coexist for now as we refactor realtime
+        if "import" in args.actions:  # and not args.realtime:
+            report["import"] = do_import(juris, args)
             stats.write_stats(
                 [
                     {
