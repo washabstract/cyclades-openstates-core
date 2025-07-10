@@ -32,11 +32,25 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           ref: main
 
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install gh
+
       - name: install poetry
         run: pip install poetry==1.8.4 wheel
 
       - name: update poetry lock
         run: poetry lock
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          if git diff --quiet poetry.lock; then
+            echo "changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "changes=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Configure git
         run: |
@@ -44,28 +58,28 @@ jobs:
           git config --global user.email "<>"
 
       - name: Checkout new branch
+        if: steps.check-changes.outputs.changes == 'true'
         run: git checkout -b update-core-dependency-${GITHUB_SHA}
 
       - name: Commit the changes
+        if: steps.check-changes.outputs.changes == 'true'
         run: git commit poetry.lock -m "Update Poetry.lock to ${GITHUB_SHA}"
 
       - name: Push branch
+        if: steps.check-changes.outputs.changes == 'true'
         run: git push --force origin update-core-dependency-${GITHUB_SHA}:update-core-dependency-${GITHUB_SHA}
 
-      - name: Open PR
-        uses: jwalton/gh-find-current-pr@v1
-        id: findPr
-        with:
-          state: all
+      - name: Authenticate gh CLI
+        if: steps.check-changes.outputs.changes == 'true'
+        run: echo "${{ steps.app-token.outputs.token }}" | gh auth login --with-token
 
-      - name: Echo PR
+      - name: Create PR
+        if: steps.check-changes.outputs.changes == 'true'
         run: |
           gh pr create \
           --base main \
           --head update-core-dependency-${GITHUB_SHA} \
-          --body "Changes from PR https://github.com/washabstract/cyclades-openstates-core/pull/${PR}" \
-          --title "Update core dependencies"
-        if: success() && steps.findPr.outputs.number
+          --body "Auto-update dependencies from cyclades-openstates-core commit ${GITHUB_SHA}" \
+          --title "Update core dependencies (${GITHUB_SHA:0:7})"
         env:
-          PR: ${{ steps.findPr.outputs.pr }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
