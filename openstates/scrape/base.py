@@ -135,6 +135,20 @@ class Scraper(scrapelib.Scraper):
         self.kafka_producer = kafka_producer
         self.file_archiving_enabled = file_archiving_enabled
 
+
+        # HTTP connection resilience settings
+        self.http_resilience_mode = http_resilience_mode
+        self.http_resilience_headers = {}
+        # http resilience: Set up a circuit breaker to track consecutive failures
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 3
+        self._circuit_breaker_timeout = 120  # 2 minutes
+        # http resilience: Set up connection pool reset
+        self._last_reset_time = time.time()
+        self._reset_interval = 600  # Reset connection pool every 10 minutes
+        self._random_delay_on_failure_min = 5
+        self._random_delay_on_failure_max = 15
+
         # scrapelib setup
         self.timeout = settings.SCRAPELIB_TIMEOUT
         self.requests_per_minute = settings.SCRAPELIB_RPM
