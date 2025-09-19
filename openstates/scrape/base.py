@@ -291,15 +291,7 @@ class Scraper(scrapelib.Scraper):
             self._upload_jsonl_to_gcs()
             self._last_upload_time = now
 
-<<<<<<< HEAD
     def init_elasticsearch_client(self):
-=======
-        # Reset HTTP_PROXY settings to prior value, see comment above
-        os.environ["HTTP_PROXY"] = prior_proxy_env
-        os.environ["HTTPS_PROXY"] = prior_proxy_env
-
-    def save_object(self, obj):
->>>>>>> upstream/main
         """
         Initialize the Elasticsearch client.
         """
