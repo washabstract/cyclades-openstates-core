@@ -445,7 +445,7 @@ class Scraper(scrapelib.Scraper):
                     if existing_json := self.existing_session_bills.get(identifier):
                         new_json = replace_none_in_dict(new_json)
                         existing_json = replace_none_in_dict(existing_json)
-
+                        import pdb; pdb.set_trace()
                         mismatched_fields = {
                             key
                             for key in new_json.keys()
