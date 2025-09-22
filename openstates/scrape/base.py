@@ -327,11 +327,7 @@ class Scraper(scrapelib.Scraper):
         try:
             must_clauses = []
             if jurisdiction:
-                import pdb; pdb.set_trace()
-                if jurisdiction == "USA":
-                    must_clauses.append({"term": {"jurisdiction.keyword": "US"}})
-                else:
-                    must_clauses.append({"term": {"jurisdiction.keyword": jurisdiction}})
+                must_clauses.append({"term": {"jurisdiction.keyword": jurisdiction}})
             if session:
                 must_clauses.append({"term": {"legislative_session.keyword": session}})
 
@@ -445,12 +441,31 @@ class Scraper(scrapelib.Scraper):
                     if existing_json := self.existing_session_bills.get(identifier):
                         new_json = replace_none_in_dict(new_json)
                         existing_json = replace_none_in_dict(existing_json)
-                        import pdb; pdb.set_trace()
-                        mismatched_fields = {
-                            key
-                            for key in new_json.keys()
-                            if new_json[key] != existing_json.get(key)
-                        }
+
+                        def normalize_action_dates(actions):
+                            """Normalize action date fields to just the date part for comparison."""
+                            normed = []
+                            for action in actions:
+                                action = dict(action)
+                                if "date" in action and action["date"]:
+                                    # Only keep YYYY-MM-DD part
+                                    action["date"] = action["date"][:10]
+                                normed.append(action)
+                            return normed
+
+                        mismatched_fields = set()
+                        for key in new_json.keys():
+                            new_val = new_json[key]
+                            existing_val = existing_json.get(key)
+                            # Special handling for actions field
+                            if key == "actions" and isinstance(new_val, list) and isinstance(existing_val, list):
+                                normed_new = normalize_action_dates(new_val)
+                                normed_existing = normalize_action_dates(existing_val)
+                                if normed_new != normed_existing:
+                                    mismatched_fields.add(key)
+                            else:
+                                if new_val != existing_val:
+                                    mismatched_fields.add(key)
 
                         if mismatched_fields - {"_id", "jurisdiction", "scraped_at"}:
                             self.info(
