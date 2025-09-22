@@ -327,7 +327,11 @@ class Scraper(scrapelib.Scraper):
         try:
             must_clauses = []
             if jurisdiction:
-                must_clauses.append({"term": {"jurisdiction.keyword": jurisdiction}})
+                import pdb; pdb.set_trace()
+                if jurisdiction == "USA":
+                    must_clauses.append({"term": {"jurisdiction.keyword": "US"}})
+                else:
+                    must_clauses.append({"term": {"jurisdiction.keyword": jurisdiction}})
             if session:
                 must_clauses.append({"term": {"legislative_session.keyword": session}})
 
