@@ -1,5 +1,18 @@
 # Changelog
 
+## 6.24.5 - Sep 5, 2025
+* Fix NEW bug introduced by messing with proxy/realtime (python, why would
+  you retrieve a value for an env var that you can't encode back to an env var?)
+
+## 6.24.4 - Sep 5, 2025
+* Fix same bug but with interaction between archive mode and HTTP proxy
+
+## 6.24.3 - Sep 5, 2025
+* Fix bug caused by interaction between usage of 3rd party HTTP proxy and
+  realtime storage of output to GCS.
+* Fix bug where request output is returned as None in some cases, when using
+  --http-resilience mode
+
 ## 6.24.2 - Jun 24, 2025
 * Change real-time mode to be non-exclusive while we work on refactoring it.
   The --realtime flag will no longer prevent normal import nor prevent the
