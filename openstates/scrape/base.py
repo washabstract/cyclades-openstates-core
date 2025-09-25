@@ -448,8 +448,13 @@ class Scraper(scrapelib.Scraper):
                             for action in actions:
                                 action = dict(action)
                                 if "date" in action and action["date"]:
-                                    # Only keep YYYY-MM-DD part
-                                    action["date"] = action["date"][:10]
+                                    date_str = str(action["date"]).strip()
+                                    # Only slice if we have at least 10 characters and it looks like a date
+                                    if len(date_str) >= 10 and date_str[4] == '-' and date_str[7] == '-':
+                                        action["date"] = date_str[:10]
+                                    else:
+                                        # Log warning for malformed dates but don't crash
+                                        print(f"Warning: Malformed date format '{date_str}', keeping as-is")
                                 normed.append(action)
                             return normed
 
@@ -515,8 +520,6 @@ class Scraper(scrapelib.Scraper):
             else:
                 with open(file_path, 'w') as f:
                     json.dump(obj.as_dict(), f, cls=utils.JSONEncoderPlus)
-            with open(file_path, "w") as f:
-                json.dump(obj.as_dict(), f, cls=utils.JSONEncoderPlus)
 
             # Periodically push data to GCS by data class
             if self.realtime:
