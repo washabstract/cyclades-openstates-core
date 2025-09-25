@@ -442,11 +442,37 @@ class Scraper(scrapelib.Scraper):
                         new_json = replace_none_in_dict(new_json)
                         existing_json = replace_none_in_dict(existing_json)
 
-                        mismatched_fields = {
-                            key
-                            for key in new_json.keys()
-                            if new_json[key] != existing_json.get(key)
-                        }
+                        def normalize_action_dates(actions):
+                            """Normalize action date fields to just the date part for comparison."""
+                            normed = []
+                            for action in actions:
+                                action = dict(action)
+                                if "date" in action and action["date"]:
+                                    date_str = str(action["date"]).strip()
+                                    # Only slice if we have at least 10 characters and it looks like a date
+                                    if len(date_str) >= 10:
+                                        try:
+                                            parsed = datetime.datetime.strptime(date_str[:10], "%Y-%m-%d")
+                                            action["date"] = parsed.date().isoformat()
+                                        except ValueError:
+                                            # Log warning for malformed dates but don't crash
+                                            print(f"Warning: Malformed date format '{date_str}', keeping as-is")
+                                normed.append(action)
+                            return normed
+
+                        mismatched_fields = set()
+                        for key in new_json.keys():
+                            new_val = new_json[key]
+                            existing_val = existing_json.get(key)
+                            # Special handling for actions field
+                            if key == "actions" and isinstance(new_val, list) and isinstance(existing_val, list):
+                                normed_new = normalize_action_dates(new_val)
+                                normed_existing = normalize_action_dates(existing_val)
+                                if normed_new != normed_existing:
+                                    mismatched_fields.add(key)
+                            else:
+                                if new_val != existing_val:
+                                    mismatched_fields.add(key)
 
                         if mismatched_fields - {"_id", "jurisdiction", "scraped_at"}:
                             self.info(
@@ -496,8 +522,6 @@ class Scraper(scrapelib.Scraper):
             else:
                 with open(file_path, 'w') as f:
                     json.dump(obj.as_dict(), f, cls=utils.JSONEncoderPlus)
-            with open(file_path, "w") as f:
-                json.dump(obj.as_dict(), f, cls=utils.JSONEncoderPlus)
 
             # Periodically push data to GCS by data class
             if self.realtime:
