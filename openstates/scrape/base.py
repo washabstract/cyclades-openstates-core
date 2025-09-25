@@ -450,11 +450,13 @@ class Scraper(scrapelib.Scraper):
                                 if "date" in action and action["date"]:
                                     date_str = str(action["date"]).strip()
                                     # Only slice if we have at least 10 characters and it looks like a date
-                                    if len(date_str) >= 10 and date_str[4] == '-' and date_str[7] == '-':
-                                        action["date"] = date_str[:10]
-                                    else:
-                                        # Log warning for malformed dates but don't crash
-                                        print(f"Warning: Malformed date format '{date_str}', keeping as-is")
+                                    if len(date_str) >= 10:
+                                        try:
+                                            parsed = datetime.datetime.strptime(date_str[:10], "%Y-%m-%d")
+                                            action["date"] = parsed.date().isoformat()
+                                        except ValueError:
+                                            # Log warning for malformed dates but don't crash
+                                            print(f"Warning: Malformed date format '{date_str}', keeping as-is")
                                 normed.append(action)
                             return normed
 
