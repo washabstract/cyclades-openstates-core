@@ -169,6 +169,15 @@ class Scraper(scrapelib.Scraper):
 
         self.existing_session_bills = None
 
+        # caching
+        if settings.CACHE_DIR:
+            self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
+
+        # HTTP resilience initialization
+        if self.http_resilience_mode:
+            self.headers["User-Agent"] = get_random_user_agent()
+            self._create_fresh_session()
+
         # validation
         self.strict_validation = strict_validation
 
@@ -638,7 +647,7 @@ class Scraper(scrapelib.Scraper):
             return super().get(url, **kwargs)
 
     def post(self, url, data=None, json=None, **kwargs):
-        request_func = lambda: super(Scraper, self).post(url, data=data, json=json**kwargs)  # noqa: E731
+        request_func = lambda: super(Scraper, self).post(url, data=data, json=json, **kwargs)  # noqa: E731
         if self.http_resilience_mode:
             return self.request_resiliently(request_func)
         else:
