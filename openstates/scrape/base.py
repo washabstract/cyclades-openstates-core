@@ -169,6 +169,10 @@ class Scraper(scrapelib.Scraper):
 
         self.existing_session_bills = None
 
+        # caching
+        if settings.CACHE_DIR:
+            self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
+
         # validation
         self.strict_validation = strict_validation
 
@@ -182,6 +186,11 @@ class Scraper(scrapelib.Scraper):
         self.warning = self.logger.warning
         self.error = self.logger.error
         self.critical = self.logger.critical
+
+        # HTTP resilience initialization (after logger is set up)
+        if self.http_resilience_mode:
+            self.headers["User-Agent"] = get_random_user_agent()
+            self._create_fresh_session()
 
         # caching
         if settings.CACHE_DIR:
@@ -638,7 +647,7 @@ class Scraper(scrapelib.Scraper):
             return super().get(url, **kwargs)
 
     def post(self, url, data=None, json=None, **kwargs):
-        request_func = lambda: super(Scraper, self).post(url, data=data, json=json**kwargs)  # noqa: E731
+        request_func = lambda: super(Scraper, self).post(url, data=data, json=json, **kwargs)  # noqa: E731
         if self.http_resilience_mode:
             return self.request_resiliently(request_func)
         else:
