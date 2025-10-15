@@ -126,7 +126,7 @@ def do_scrape(
         kafka=args.kafka,
         kafka_producer=kafka_producer,
         file_archiving_enabled=args.archive,
-        http_resilience_mode=getattr(args, 'http_resilience', False),
+        http_resilience_mode=args.http_resilience,
     )
     report['jurisdiction'] = jscraper.do_scrape()
     stats.write_stats(
@@ -171,7 +171,7 @@ def do_scrape(
                     kafka=args.kafka,
                     kafka_producer=kafka_producer,
                     file_archiving_enabled=args.archive,
-                    http_resilience_mode=getattr(args, 'http_resilience', False),
+                    http_resilience_mode=args.http_resilience,
                 )
                 partial_report = scraper.do_scrape(**scrape_args, session=session)
                 stats.write_stats(
@@ -209,7 +209,7 @@ def do_scrape(
                 kafka=args.kafka,
                 kafka_producer=kafka_producer,
                 file_archiving_enabled=args.archive,
-                http_resilience_mode=getattr(args, 'http_resilience', False),
+                http_resilience_mode=args.http_resilience,
             )
             report[scraper_name] = scraper.do_scrape(**scrape_args)
             session = scrape_args.get("session", "")
