@@ -173,11 +173,6 @@ class Scraper(scrapelib.Scraper):
         if settings.CACHE_DIR:
             self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
 
-        # HTTP resilience initialization
-        if self.http_resilience_mode:
-            self.headers["User-Agent"] = get_random_user_agent()
-            self._create_fresh_session()
-
         # validation
         self.strict_validation = strict_validation
 
@@ -191,6 +186,11 @@ class Scraper(scrapelib.Scraper):
         self.warning = self.logger.warning
         self.error = self.logger.error
         self.critical = self.logger.critical
+
+        # HTTP resilience initialization (after logger is set up)
+        if self.http_resilience_mode:
+            self.headers["User-Agent"] = get_random_user_agent()
+            self._create_fresh_session()
 
         # caching
         if settings.CACHE_DIR:
