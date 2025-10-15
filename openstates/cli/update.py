@@ -126,6 +126,7 @@ def do_scrape(
         kafka=args.kafka,
         kafka_producer=kafka_producer,
         file_archiving_enabled=args.archive,
+        http_resilience_mode=getattr(args, 'http_resilience', False),
     )
     report['jurisdiction'] = jscraper.do_scrape()
     stats.write_stats(
@@ -170,6 +171,7 @@ def do_scrape(
                     kafka=args.kafka,
                     kafka_producer=kafka_producer,
                     file_archiving_enabled=args.archive,
+                    http_resilience_mode=getattr(args, 'http_resilience', False),
                 )
                 partial_report = scraper.do_scrape(**scrape_args, session=session)
                 stats.write_stats(
@@ -207,6 +209,7 @@ def do_scrape(
                 kafka=args.kafka,
                 kafka_producer=kafka_producer,
                 file_archiving_enabled=args.archive,
+                http_resilience_mode=getattr(args, 'http_resilience', False),
             )
             report[scraper_name] = scraper.do_scrape(**scrape_args)
             session = scrape_args.get("session", "")
@@ -617,6 +620,12 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     )
     parser.add_argument(
         "--fastmode", action="store_true", help="use cache and turn off throttling"
+    )
+    parser.add_argument(
+        "--http-resilience", 
+        action="store_true", 
+        dest="http_resilience",
+        help="enable HTTP resilience mode for better connection handling"
     )
 
     # settings overrides
