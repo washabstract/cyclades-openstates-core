@@ -487,6 +487,11 @@ class Scraper(scrapelib.Scraper):
                             self.info(
                                 f"Bill changed, saving: {jurisdiction}/{session}/{identifier}"
                             )
+                        # If the bill summary is less than 100 characters, it is inefficient and should be processed
+                        elif len(existing_json.get("bill_summary")) < 100:
+                            self.info(
+                                f"Bill summary inefficient, saving: {jurisdiction}/{session}/{identifier}"
+                            )
                         else:
                             self.info(
                                 f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}"
