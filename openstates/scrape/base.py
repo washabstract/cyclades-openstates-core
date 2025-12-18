@@ -194,7 +194,7 @@ class Scraper(scrapelib.Scraper):
 
         # caching
         if settings.CACHE_DIR:
-            print(settings.CACHE_BUCKET+'/'+self.jurisdiction.name)
+            print(f"{settings.CACHE_BUCKET}/{self.jurisdiction.name}")
             if os.environ.get('SYNC_S3_ARCHIVE', 'false').lower() == 'true':
                 self.info(f"Syncing cache from S3 bucket {settings.CACHE_BUCKET}")
                 os.makedirs(settings.CACHE_DIR, exist_ok=True)
