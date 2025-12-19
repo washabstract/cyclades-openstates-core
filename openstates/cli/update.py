@@ -377,8 +377,9 @@ def check_session_list(juris: State) -> set[str]:
 
     for session in juris.legislative_sessions:
         sessions.add(session.get("_scraped_name", session["identifier"]))
-        if session.get("active"):
+        if session.get("active") or ("all" in getattr(juris, "backfill", [])):
             active_sessions.add(session.get("identifier"))
+    active_sessions.update(getattr(juris, "backfill", []))
 
     if not active_sessions:
         raise CommandError(f"No active sessions on {scraper}")
