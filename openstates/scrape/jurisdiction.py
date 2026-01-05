@@ -2,6 +2,9 @@ from .base import BaseModel, Scraper
 from .popolo import Organization
 from .schemas.jurisdiction import schema
 from ..metadata import lookup
+import requests
+import os
+from datetime import datetime
 
 
 _name_fixes = {
@@ -26,13 +29,16 @@ _name_fixes = {
 
 
 class State(BaseModel):
-    """ Base class for a jurisdiction """
+    """Base class for a jurisdiction"""
 
     _type = "jurisdiction"
     _schema = schema
 
     # schema objects
+    historical_legislative_sessions = []
     legislative_sessions = []
+    cronos_created_sessions = []
+    backfill = []
     extras = {}
 
     # non-db properties
@@ -78,6 +84,90 @@ class State(BaseModel):
     def url(self):
         return self.metadata.url
 
+    @property
+    def new_sessions(
+        self,
+        endpoint: str = os.getenv("CRONOS_ENDPOINT") + "/sessions/query",
+    ):
+        """Requires CRONOS_ENDPOINT for getting the legislative sessions. Note that legislative sessions are retrieved as a list of json objects.
+
+        The legislative sessions appear in the following format
+        {
+            "identifier": "2021",
+            "name": "2021 Regular Session",
+            "start_date": "2021-01-01",
+            "end_date": "2021-12-31",
+            "classification": "primary", # primary or special
+            }
+        """
+        params = {"state_names": self.name}
+        try:
+            response = requests.get(
+                endpoint,
+                params=params,
+            )
+            response.raise_for_status()
+        except requests.RequestException:
+            print("No sessions found for ", self.name, " in cronos")
+            return []
+
+        sessions = []
+        for session in response.json():
+            # Clean the session by removing any unnecessary fields from cronos (session ID, etc.)
+            clean_session = self.check_session_active(
+                {
+                    key: value
+                    for key, value in session.items()
+                    if key
+                    in [
+                        "classification",
+                        "identifier",
+                        "active",
+                        "name",
+                        "start_date",
+                        "end_date",
+                        "_scraped_name",
+                    ]
+                }
+            )
+            sessions.append(clean_session)
+
+        # TODO: Move the above feature to cronos' endpoint, and then we can just have this line: return [{key: value for key, value in session.items() if key in ["classification", "identifier", "name", "start_date", "end_date", "active"]} for session in response.json()]
+        return sessions
+
+    @property
+    def legislative_sessions(self):
+        """Returns a list of legislative sessions. If opt_for_new is True, it will override the historical sessions with the new ones from cronos. Otherwise,
+        any sessions from cronos with the same identifier as the historical ones will not be used.
+        """
+        missing_sessions = set(
+            session["identifier"] for session in self.historical_legislative_sessions
+        ) - set(session["identifier"] for session in self.new_sessions)
+        cronos_sessions_map = {
+            session["identifier"]: session for session in self.new_sessions
+        }
+        historical_sessions_map = {
+            session["identifier"]: session
+            for session in self.historical_legislative_sessions
+        }
+
+        for session in historical_sessions_map.keys():
+            # Check if the session is active, and if not, set it to inactive
+            if session in missing_sessions:
+                new_created_session = self.create_session_in_cronos(
+                    historical_sessions_map[session]
+                )['session']
+                cronos_sessions_map[new_created_session["identifier"]] = new_created_session
+
+            # For any values in the historical sessions that are not in the cronos sessions, we need to add them to what we're about to return
+            for key in set(historical_sessions_map[session].keys()) - set(
+                cronos_sessions_map[session].keys()
+            ):
+                cronos_sessions_map[session][key] = historical_sessions_map[session][
+                    key
+                ]
+        return list(cronos_sessions_map.values())
+
     def get_organizations(self):
         legislature = Organization(
             name=self.metadata.legislature_name, classification="legislature"
@@ -94,6 +184,30 @@ class State(BaseModel):
                 classification="lower",
                 parent_id=legislature._id,
             )
+
+    def check_session_active(self, session: dict):
+        """For a given session dictionary, checks to see if "active" is a denoted field. If it's not, then 'active' is set based on the start_date and end_date"""
+        if "active" not in session:
+            session["active"] = (
+                datetime.strptime(session["start_date"], "%Y-%m-%d").date()
+                <= datetime.now().date()
+                <= datetime.strptime(session["end_date"], "%Y-%m-%d").date()
+            )
+        return session
+
+    def create_session_in_cronos(
+        self,
+        session: dict,
+        cronos_endpoint: str = os.getenv("CRONOS_ENDPOINT") + "/sessions/create",
+    ):
+        try:
+            session["state_name"] = self.name
+            response = requests.post(cronos_endpoint, data=session, timeout=20)
+            response.raise_for_status()
+            return {'success': response.ok, 'session': response.json().get('session', {})}
+        except Exception as e:
+            print(f"Failed to send new session data to cronos: {e}")
+            return False
 
     def get_session_list(self) -> list[str]:
         raise NotImplementedError()

@@ -4,6 +4,7 @@ from .utils import transformers
 # settings for realtime flag
 S3_REALTIME_BASE = os.environ.get("S3_REALTIME_BASE")  # e.g 's3://realtime-bucket'
 SQS_QUEUE_URL = os.environ.get("SQS_QUEUE_URL")
+S3_BILLS_BUCKET = "cyclades"  # Current bucket for which bills are stored. Used to check and validate existence of bills
 
 # scrape settings
 
@@ -21,6 +22,7 @@ SCRAPELIB_VERIFY = verify
 
 CACHE_DIR = os.path.join(os.getcwd(), "_cache")
 SCRAPED_DATA_DIR = os.path.join(os.getcwd(), "_data")
+CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 
 IMPORT_TRANSFORMERS = {
     "bill": {

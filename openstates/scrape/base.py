@@ -10,16 +10,31 @@ import os
 import random
 import requests
 import scrapelib
+import subprocess
 import time
 from urllib.error import URLError
 import uuid
 from collections import defaultdict, OrderedDict
+from elasticsearch import Elasticsearch
+from elasticsearch.exceptions import ConnectionError as ESConnectionError
 from jsonschema import Draft3Validator, FormatChecker
-
+from warnings import filterwarnings
 from .. import utils, settings
 from ..exceptions import ScrapeError, ScrapeValueError, EmptyScrape
 
 
+def replace_none_in_dict(bill_json: dict) -> dict:
+    """Recursively convert None values to empty strings in a dictionary"""
+    if isinstance(bill_json, dict):
+        return {key: replace_none_in_dict(value) for key, value in bill_json.items()}
+    elif isinstance(bill_json, list):
+        return [replace_none_in_dict(item) for item in bill_json]
+    elif bill_json is None:
+        return ""
+    elif isinstance(bill_json, datetime.date):
+        return bill_json.strftime('%Y-%m-%d')
+    else:
+        return bill_json
 GCP_PROJECT = os.environ.get("GCP_PROJECT", None)
 BUCKET_NAME = os.environ.get("BUCKET_NAME", None)
 SCRAPE_REALTIME_LAKE_PREFIX = os.environ.get(
@@ -29,12 +44,12 @@ SCRAPE_REALTIME_LAKE_PREFIX = os.environ.get(
 
 @FormatChecker.cls_checks("uri-blank")
 def uri_blank(value):
-    return value == "" or FormatChecker().conforms(value, "uri")
+    return value == '' or FormatChecker().conforms(value, 'uri')
 
 
-@FormatChecker.cls_checks("uri")
+@FormatChecker.cls_checks('uri')
 def check_uri(val):
-    return val and val.startswith(("http://", "https://", "ftp://"))
+    return val and val.startswith(('http://', 'https://', 'ftp://'))
 
 
 def cleanup_list(obj, default):
@@ -48,7 +63,7 @@ def cleanup_list(obj, default):
 
 
 def clean_whitespace(obj):
-    """deep whitespace clean for ScrapeObj & dicts"""
+    '''deep whitespace clean for ScrapeObj & dicts'''
     if isinstance(obj, dict):
         items = obj.items()
         use_setattr = False
@@ -67,7 +82,7 @@ def clean_whitespace(obj):
             elif isinstance(v[0], (dict, object)):
                 newv = [clean_whitespace(i) for i in v]
             else:
-                raise ValueError(f"Unhandled case, {k} is list of {type(v[0])}")
+                raise ValueError(f'Unhandled case, {k} is list of {type(v[0])}')
         else:
             continue
 
@@ -77,7 +92,6 @@ def clean_whitespace(obj):
             obj[k] = newv
 
     return obj
-
 
 def get_random_user_agent():
     """
@@ -96,7 +110,7 @@ def get_random_user_agent():
 
 
 class Scraper(scrapelib.Scraper):
-    """Base class for all scrapers"""
+    '''Base class for all scrapers'''
 
     def __init__(
         self,
@@ -106,6 +120,8 @@ class Scraper(scrapelib.Scraper):
         strict_validation=True,
         fastmode=False,
         realtime=False,
+        kafka=None,
+        kafka_producer=None,
         file_archiving_enabled=False,
         http_resilience_mode=False,
     ):
@@ -115,14 +131,10 @@ class Scraper(scrapelib.Scraper):
         self.jurisdiction = jurisdiction
         self.datadir = datadir
         self.realtime = realtime
+        self.kafka = kafka
+        self.kafka_producer = kafka_producer
         self.file_archiving_enabled = file_archiving_enabled
 
-        # scrapelib setup
-        self.timeout = settings.SCRAPELIB_TIMEOUT
-        self.requests_per_minute = settings.SCRAPELIB_RPM
-        self.retry_attempts = settings.SCRAPELIB_RETRY_ATTEMPTS
-        self.retry_wait_seconds = settings.SCRAPELIB_RETRY_WAIT_SECONDS
-        self.verify = settings.SCRAPELIB_VERIFY
 
         # HTTP connection resilience settings
         self.http_resilience_mode = http_resilience_mode
@@ -137,19 +149,29 @@ class Scraper(scrapelib.Scraper):
         self._random_delay_on_failure_min = 5
         self._random_delay_on_failure_max = 15
 
+        # scrapelib setup
+        self.timeout = settings.SCRAPELIB_TIMEOUT
+        self.requests_per_minute = settings.SCRAPELIB_RPM
+        self.retry_attempts = settings.SCRAPELIB_RETRY_ATTEMPTS
+        self.retry_wait_seconds = settings.SCRAPELIB_RETRY_WAIT_SECONDS
+        self.verify = settings.SCRAPELIB_VERIFY
+
         # output
         self.output_file_path = None
         self._realtime_upload_data_classes = settings.REALTIME_UPLOAD_DATA_CLASSES
         self._upload_interval = 60 * 15  # 15 minutes
         self._last_upload_time = time.time()
 
-        # caching
-        if settings.CACHE_DIR:
-            self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
-
         if fastmode:
             self.requests_per_minute = 0
             self.cache_write_only = False
+            self.es_client = self.init_elasticsearch_client()
+
+        self.existing_session_bills = None
+
+        # caching
+        if settings.CACHE_DIR:
+            self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
 
         # validation
         self.strict_validation = strict_validation
@@ -158,40 +180,51 @@ class Scraper(scrapelib.Scraper):
         self.output_names = defaultdict(set)
 
         # logging convenience methods
-        self.logger = logging.getLogger("openstates")
+        self.logger = logging.getLogger('openstates')
         self.info = self.logger.info
         self.debug = self.logger.debug
         self.warning = self.logger.warning
         self.error = self.logger.error
         self.critical = self.logger.critical
 
-        modname = os.environ.get("SCRAPE_OUTPUT_HANDLER")
+        # HTTP resilience initialization (after logger is set up)
+        if self.http_resilience_mode:
+            self.headers["User-Agent"] = get_random_user_agent()
+            self._create_fresh_session()
+
+        # caching
+        if settings.CACHE_DIR:
+            print(settings.CACHE_BUCKET+'/'+self.jurisdiction.name)
+            if os.environ.get('SYNC_S3_ARCHIVE', 'false').lower() == 'true':
+                self.info(f"Syncing cache from S3 bucket {settings.CACHE_BUCKET}")
+                os.makedirs(settings.CACHE_DIR, exist_ok=True)
+                subprocess.run(['aws', 's3', 'sync', settings.CACHE_BUCKET+'/'+self.jurisdiction.name , settings.CACHE_DIR], check=True)
+                self.info("Cache sync completed")
+                self.cache_storage = scrapelib.FileCache(settings.CACHE_DIR)
+
+        modname = os.environ.get('SCRAPE_OUTPUT_HANDLER')
         if modname is None:
             self.scrape_output_handler = None
         else:
             handler = importlib.import_module(modname)
             self.scrape_output_handler = handler.Handler(self)
 
-        if self.http_resilience_mode:
-            self.headers["User-Agent"] = get_random_user_agent()
-            self._create_fresh_session()
-
     def push_to_queue(self):
-        """Push this output to the sqs for realtime imports."""
+        '''Push this output to the sqs for realtime imports.'''
 
         # Create SQS client
-        sqs = boto3.client("sqs")
+        sqs = boto3.client('sqs')
 
         queue_url = settings.SQS_QUEUE_URL
-        bucket = settings.S3_REALTIME_BASE.replace("s3://", "")
+        bucket = settings.S3_REALTIME_BASE.replace('s3://', '')
 
         message_body = json.dumps(
             {
-                "file_path": self.output_file_path,
-                "bucket": bucket,
-                "jurisdiction_id": self.jurisdiction.jurisdiction_id,
-                "jurisdiction_name": self.jurisdiction.name,
-                "file_archiving_enabled": self.file_archiving_enabled,
+                'file_path': self.output_file_path,
+                'bucket': bucket,
+                'jurisdiction_id': self.jurisdiction.jurisdiction_id,
+                'jurisdiction_name': self.jurisdiction.name,
+                'file_archiving_enabled': self.file_archiving_enabled,
             }
         )
 
@@ -200,8 +233,8 @@ class Scraper(scrapelib.Scraper):
             QueueUrl=queue_url,
             DelaySeconds=10,
             MessageAttributes={
-                "Title": {"DataType": "String", "StringValue": "S3 Output Path"},
-                "Author": {"DataType": "String", "StringValue": "Open States"},
+                'Title': {'DataType': 'String', 'StringValue': 'S3 Output Path'},
+                'Author': {'DataType': 'String', 'StringValue': 'Open States'},
             },
             MessageBody=message_body,
         )
@@ -267,28 +300,97 @@ class Scraper(scrapelib.Scraper):
             self._upload_jsonl_to_gcs()
             self._last_upload_time = now
 
-        # Reset HTTP_PROXY settings to prior value, see comment above
-        os.environ["HTTP_PROXY"] = prior_proxy_env
-        os.environ["HTTPS_PROXY"] = prior_proxy_env
+    def init_elasticsearch_client(self):
+        """
+        Initialize the Elasticsearch client.
+        """
+        es_cloud_id = os.environ.get(
+            "ELASTIC_CLOUD_ID",
+            None,
+        )
+        es_user = os.environ.get("ELASTIC_BASIC_AUTH_USER", None)
+        es_password = os.environ.get("ELASTIC_BASIC_AUTH_PASS", None)
+
+        if not any([es_cloud_id, es_user, es_password]):
+            raise ScrapeError(
+                "Elasticsearch credentials are not set. "
+                "Please set ELASTIC_CLOUD_ID, ELASTIC_BASIC_AUTH_USER, and ELASTIC_BASIC_AUTH_PASS."
+            )
+        filterwarnings("ignore", category=Warning, module="elasticsearch")
+
+        es_client = Elasticsearch(
+            cloud_id=es_cloud_id,
+            http_auth=(
+                es_user,
+                es_password,
+            ),  # http_auth is used in ES 7.x instead of basic_auth (to match python 3.9 limits)
+            verify_certs=True,
+        )
+        return es_client
+
+    def get_elastic_entries(self, bill_json: dict, jurisdiction: str) -> dict:
+        """
+        Check if the bill exists in Elasticsearch and return all matching entries.
+        """
+        session = bill_json.get("legislative_session")
+        try:
+            must_clauses = []
+            if jurisdiction:
+                must_clauses.append({"term": {"jurisdiction.keyword": jurisdiction}})
+            if session:
+                must_clauses.append({"term": {"legislative_session.keyword": session}})
+
+            query = {
+                "query": {"bool": {"must": must_clauses}},
+                "size": 10000,  
+            }
+            
+            response = self.es_client.search(
+                index="cyclades",
+                body=query,
+                scroll='2m'
+            )
+            
+            all_hits = {}
+            scroll_id = response['_scroll_id']
+            
+            for hit in response["hits"]["hits"]:
+                all_hits[hit["_source"]["identifier"]] = hit["_source"]
+            
+            while len(response['hits']['hits']) > 0:
+                response = self.es_client.scroll(scroll_id=scroll_id, scroll='2m')
+                
+                for hit in response["hits"]["hits"]:
+                    all_hits[hit["_source"]["identifier"]] = hit["_source"]
+            
+            self.es_client.clear_scroll(scroll_id=scroll_id)
+            
+            return all_hits if all_hits else None
+        except ESConnectionError as e:
+            print(f"Connection error with Elasticsearch. Verify that the credentials are correct and updated: {e}")
+            return None
+        except Exception as e:
+            print(f"Error during Elasticsearch scroll: {e}")
+            return None
 
     def save_object(self, obj):
-        """
+        '''
         Save object to disk as JSON.
 
         Generally shouldn't be called directly.
-        """
+        '''
         clean_whitespace(obj)
         obj.pre_save(self.jurisdiction)
 
-        filename = f"{obj._type}_{obj._id}.json".replace("/", "-")
-        self.info(f"save {obj._type} {obj} as {filename}")
+        filename = f'{obj._type}_{obj._id}.json'.replace('/', '-')
+        self.info(f'save {obj._type} {obj} as {filename}')
 
         self.debug(
             json.dumps(
                 OrderedDict(sorted(obj.as_dict().items())),
                 cls=utils.JSONEncoderPlus,
                 indent=4,
-                separators=(",", ": "),
+                separators=(',', ': '),
             )
         )
 
@@ -297,8 +399,143 @@ class Scraper(scrapelib.Scraper):
         if self.scrape_output_handler is None:
             file_path = os.path.join(self.datadir, filename)
 
-            with open(file_path, "w") as f:
-                json.dump(obj.as_dict(), f, cls=utils.JSONEncoderPlus)
+            try:
+                # Remove redundant prefix and amend file path
+                upload_file_path = file_path[
+                    file_path.index('_data') + len('_data') + 1 :
+                ]
+                jurisdiction = upload_file_path[:2]
+                # Vote events will be routed through this conditional
+                if hasattr(obj, 'motion_text'):
+                    identifier = obj.bill_identifier
+                    logging.info(
+                        f'Saving vote event from bill {identifier}.'
+                    )
+                # Bills will be routed through this conditional
+                elif hasattr(obj, 'legislative_session') and obj.legislative_session:
+                    session = obj.legislative_session
+                    identifier = obj.identifier
+                    upload_file_path = (
+                        f'{jurisdiction}/{session}/{identifier}/{upload_file_path[3:]}'
+                    )
+                # All other ancillary JSONs will be routed here (e.g. jurisdiction JSONs)
+                else:
+                    upload_file_path = f'{jurisdiction}/{"Jurisdiction_Information"}/{upload_file_path[3:]}'
+
+            except ValueError:
+                upload_file_path = file_path
+
+            # Fastmode S3 cache check
+            if (
+                self.requests_per_minute == 0 and  # fastmode is on
+                hasattr(obj, 'identifier') and
+                hasattr(obj, 'legislative_session')
+            ):
+                identifier = obj.identifier
+                session = obj.legislative_session
+                jurisdiction = upload_file_path[:2].upper()
+
+                s3 = boto3.client("s3")
+                bucket = settings.S3_BILLS_BUCKET
+
+                try:
+                    self.info(f"Checking for existing {identifier} in bill cache")
+                    new_json = obj.as_dict()
+
+                    if self.existing_session_bills is None:
+                        self.existing_session_bills = self.get_elastic_entries(
+                            new_json, jurisdiction
+                        )
+
+                    if existing_json := self.existing_session_bills.get(identifier):
+                        new_json = replace_none_in_dict(new_json)
+                        existing_json = replace_none_in_dict(existing_json)
+
+                        def normalize_action_dates(actions):
+                            """Normalize action date fields to just the date part for comparison."""
+                            normed = []
+                            for action in actions:
+                                action = dict(action)
+                                if "date" in action and action["date"]:
+                                    date_str = str(action["date"]).strip()
+                                    # Only slice if we have at least 10 characters and it looks like a date
+                                    if len(date_str) >= 10:
+                                        try:
+                                            parsed = datetime.datetime.strptime(date_str[:10], "%Y-%m-%d")
+                                            action["date"] = parsed.date().isoformat()
+                                        except ValueError:
+                                            # Log warning for malformed dates but don't crash
+                                            print(f"Warning: Malformed date format '{date_str}', keeping as-is")
+                                normed.append(action)
+                            return normed
+
+                        mismatched_fields = set()
+                        for key in new_json.keys():
+                            new_val = new_json[key]
+                            existing_val = existing_json.get(key)
+                            # Special handling for actions field
+                            if key == "actions" and isinstance(new_val, list) and isinstance(existing_val, list):
+                                normed_new = normalize_action_dates(new_val)
+                                normed_existing = normalize_action_dates(existing_val)
+                                if normed_new != normed_existing:
+                                    mismatched_fields.add(key)
+                            else:
+                                if new_val != existing_val:
+                                    mismatched_fields.add(key)
+
+                        if mismatched_fields - {"_id", "jurisdiction", "scraped_at"}:
+                            self.info(
+                                f"Bill changed, saving: {jurisdiction}/{session}/{identifier}"
+                            )
+                        # If the bill summary is less than 100 characters, it is inefficient and should be processed
+                        elif len(existing_json.get("bill_summary")) < 100:
+                            self.info(
+                                f"Bill summary inefficient, saving: {jurisdiction}/{session}/{identifier}"
+                            )
+                        else:
+                            self.info(
+                                f"Bill unchanged — skipping save: {jurisdiction}/{session}/{identifier}"
+                            )
+                            return
+                    else:
+                        self.info(
+                            f"Bill not found in elastic, saving: {jurisdiction}/{session}/{identifier}"
+                        )
+                except Exception as e:
+                    self.warning(f"S3 comparison failed for {identifier}: {e}")
+
+
+            if self.kafka:  # Send to Kafka only if producer is initialized
+                bill_data = obj.as_dict()
+                bill_data.pop("jurisdiction", None)
+                bill_data.pop("scraped_at", None)
+                self.kafka_producer.send(jurisdiction.upper(), bill_data)
+                # Kafka producers use batching to optimize throughput and reduce the load on brokers
+                # The delay below ensures messages are sent before the script continues
+                # Documentation: https://kafka.apache.org/documentation/#producerconfigs_linger.ms
+                time.sleep(0.1)
+                logging.info(f'{obj._type} {obj} sent to Kafka.')
+                self.kafka_producer.flush()
+            elif self.realtime:
+                self.output_file_path = str(upload_file_path)
+
+                s3 = boto3.client('s3')
+                bucket = settings.S3_REALTIME_BASE.removeprefix('s3://')
+
+                s3.put_object(
+                    Body=json.dumps(
+                        OrderedDict(sorted(obj.as_dict().items())),
+                        cls=utils.JSONEncoderPlus,
+                        separators=(',', ': '),
+                    ),
+                    Bucket=bucket,
+                    Key=self.output_file_path,
+                )
+
+                self.push_to_queue()
+            else:
+                with open(file_path, 'w') as f:
+                    json.dump(obj.as_dict(), f, cls=utils.JSONEncoderPlus)
 
             # Periodically push data to GCS by data class
             if self.realtime:
@@ -321,15 +558,15 @@ class Scraper(scrapelib.Scraper):
             self.save_object(obj)
 
     def do_scrape(self, **kwargs):
-        record = {"objects": defaultdict(int)}
+        record = {'objects': defaultdict(int)}
         self.output_names = defaultdict(set)
-        record["start"] = utils.utcnow()
+        record['start'] = utils.utcnow()
         try:
             for obj in self.scrape(**kwargs) or []:
                 # allow for returning empty objects in a list
                 if not obj:
                     continue
-                if hasattr(obj, "__iter__"):
+                if hasattr(obj, '__iter__'):
                     for iterobj in obj:
                         self.save_object(iterobj)
                 else:
@@ -337,27 +574,27 @@ class Scraper(scrapelib.Scraper):
         except EmptyScrape:
             if self.output_names:
                 raise ScrapeError(
-                    f"objects returned from {self.__class__.__name__} scrape, expected none"
+                    f'objects returned from {self.__class__.__name__} scrape, expected none'
                 )
             self.warning(
-                f"{self.__class__.__name__} raised EmptyScrape, continuing without any results"
+                f'{self.__class__.__name__} raised EmptyScrape, continuing without any results'
             )
         else:
             if not self.output_names:
                 raise ScrapeError(
-                    "no objects returned from {} scrape".format(self.__class__.__name__)
+                    'no objects returned from {} scrape'.format(self.__class__.__name__)
                 )
 
-        record["end"] = utils.utcnow()
-        record["skipped"] = getattr(self, "skipped", 0)
+        record['end'] = utils.utcnow()
+        record['skipped'] = getattr(self, 'skipped', 0)
         for _type, nameset in self.output_names.items():
-            record["objects"][_type] += len(nameset)
+            record['objects'][_type] += len(nameset)
 
         return record
 
     def scrape(self, **kwargs):
         raise NotImplementedError(
-            self.__class__.__name__ + " must provide a scrape() method"
+            self.__class__.__name__ + ' must provide a scrape() method'
         )
 
     def request_resiliently(self, request_func):
@@ -415,7 +652,7 @@ class Scraper(scrapelib.Scraper):
             return super().get(url, **kwargs)
 
     def post(self, url, data=None, json=None, **kwargs):
-        request_func = lambda: super(Scraper, self).post(url, data=data, json=json**kwargs)  # noqa: E731
+        request_func = lambda: super(Scraper, self).post(url, data=data, json=json, **kwargs)  # noqa: E731
         if self.http_resilience_mode:
             return self.request_resiliently(request_func)
         else:
@@ -532,7 +769,7 @@ class BaseBillScraper(Scraper):
     skipped = 0
 
     class ContinueScraping(Exception):
-        """indicate that scraping should continue without saving an object"""
+        '''indicate that scraping should continue without saving an object'''
 
         pass
 
@@ -542,18 +779,18 @@ class BaseBillScraper(Scraper):
             try:
                 yield self.get_bill(bill_id, **extras)
             except self.ContinueScraping as exc:
-                self.warning("skipping %s: %r", bill_id, exc)
+                self.warning('skipping %s: %r', bill_id, exc)
                 self.skipped += 1
                 continue
 
 
 class BaseModel(object):
-    """
+    '''
     This is the base class for all the Open Civic objects. This contains
     common methods and abstractions for OCD objects.
-    """
+    '''
 
-    # to be overridden by children. Something like "person" or "organization".
+    # to be overridden by children. Something like 'person' or 'organization'.
     # Used in :func:`validate`.
     _type = None
     _schema = None
@@ -567,7 +804,7 @@ class BaseModel(object):
     # validation
 
     def validate(self, schema=None):
-        """
+        '''
         Validate that we have a valid object.
 
         On error, this will raise a `ScrapeValueError`
@@ -577,16 +814,16 @@ class BaseModel(object):
         due to upstream schemas being in JSON Schema v3, and not validictory's
         modified syntax.
         ^ TODO: FIXME
-        """
+        '''
         if schema is None:
             schema = self._schema
 
         # this code copied to openstates/cli/validate - maybe update it if changes here :)
         type_checker = Draft3Validator.TYPE_CHECKER.redefine(
-            "datetime", lambda c, d: isinstance(d, (datetime.date, datetime.datetime))
+            'datetime', lambda c, d: isinstance(d, (datetime.date, datetime.datetime))
         )
         type_checker = type_checker.redefine(
-            "date",
+            'date',
             lambda c, d: (
                 isinstance(d, datetime.date) and not isinstance(d, datetime.datetime)
             ),
@@ -600,8 +837,8 @@ class BaseModel(object):
         errors = [str(error) for error in validator.iter_errors(self.as_dict())]
         if errors:
             raise ScrapeValueError(
-                "validation of {} {} failed: {}".format(
-                    self.__class__.__name__, self._id, "\n\t" + "\n\t".join(errors)
+                'validation of {} {} failed: {}'.format(
+                    self.__class__.__name__, self._id, '\n\t' + '\n\t'.join(errors)
                 )
             )
 
@@ -610,16 +847,16 @@ class BaseModel(object):
 
     def as_dict(self):
         d = {}
-        for attr in self._schema["properties"].keys():
+        for attr in self._schema['properties'].keys():
             if hasattr(self, attr):
                 d[attr] = getattr(self, attr)
-        d["_id"] = self._id
+        d['_id'] = self._id
         return d
 
     # operators
 
     def __setattr__(self, key, val):
-        if key[0] != "_" and key not in self._schema["properties"].keys():
+        if key[0] != '_' and key not in self._schema['properties'].keys():
             raise ScrapeValueError(
                 'property "{}" not in {} schema'.format(key, self._type)
             )
@@ -642,9 +879,9 @@ class SourceMixin(object):
         super(SourceMixin, self).__init__()
         self.sources = []
 
-    def add_source(self, url, *, note=""):
-        """Add a source URL from which data was collected"""
-        new = {"url": url, "note": note}
+    def add_source(self, url, *, note=''):
+        '''Add a source URL from which data was collected'''
+        new = {'url': url, 'note': note}
         self.sources.append(new)
 
 
@@ -653,8 +890,8 @@ class LinkMixin(object):
         super(LinkMixin, self).__init__()
         self.links = []
 
-    def add_link(self, url, *, note=""):
-        self.links.append({"note": note, "url": url})
+    def add_link(self, url, *, note=''):
+        self.links.append({'note': note, 'url': url})
 
 
 class AssociatedLinkMixin(object):
@@ -669,8 +906,8 @@ class AssociatedLinkMixin(object):
         date="",
         classification="",
     ):
-        if on_duplicate not in ["error", "ignore", "warn"]:
-            raise ScrapeValueError("on_duplicate must be 'warn', 'error' or 'ignore'")
+        if on_duplicate not in ['error', 'ignore', 'warn']:
+            raise ScrapeValueError('on_duplicate must be "warn", "error" or "ignore"')
 
         try:
             associated = getattr(self, collection)
@@ -678,10 +915,10 @@ class AssociatedLinkMixin(object):
             associated = self[collection]
 
         ver = {
-            "note": note,
-            "links": [],
-            "date": date,
-            "classification": classification,
+            'note': note,
+            'links': [],
+            'date': date,
+            'classification': classification,
         }
 
         # keep a list of the links we've seen, we need to iterate over whole list on each add
@@ -690,8 +927,8 @@ class AssociatedLinkMixin(object):
 
         matches = 0
         for item in associated:
-            for link in item["links"]:
-                seen_links.add(link["url"])
+            for link in item['links']:
+                seen_links.add(link['url'])
 
             if all(
                 ver.get(x) == item.get(x) for x in ["note", "date", "classification"]
@@ -701,17 +938,17 @@ class AssociatedLinkMixin(object):
 
         # it should be impossible to have multiple matches found unless someone is bypassing
         # _add_associated_link
-        assert matches <= 1, "multiple matches found in _add_associated_link"
+        assert matches <= 1, 'multiple matches found in _add_associated_link'
 
         if url in seen_links:
-            if on_duplicate == "error":
+            if on_duplicate == 'error':
                 raise ScrapeValueError(
-                    "Duplicate entry in '%s' - URL: '%s'" % (collection, url)
+                    'Duplicate entry in "%s" - URL: "%s"' % (collection, url)
                 )
-            elif on_duplicate == "warn":
+            elif on_duplicate == 'warn':
                 # default behavior: same as ignore but logs an warning so people can fix
-                logging.getLogger("openstates").warning(
-                    f"Duplicate entry in '{collection}' - URL: {url}"
+                logging.getLogger('openstates').warning(
+                    f'Duplicate entry in "{collection}" - URL: {url}'
                 )
                 return None
             else:
@@ -719,15 +956,15 @@ class AssociatedLinkMixin(object):
                 # means we should *skip* adding this link silently and continue
                 # on with our scrape. This should *ONLY* be used when there's
                 # a site issue (Version 1 == Version 2 because of a bug) and
-                # *NEVER* because "Current" happens to match "Version 3". Fix
+                # *NEVER* because 'Current' happens to match 'Version 3'. Fix
                 # that in the scraper, please.
                 #  - PRT
                 return None
 
         # OK. This is either new or old. Let's just go for it.
-        ret = {"url": url, "media_type": media_type}
+        ret = {'url': url, 'media_type': media_type}
 
-        ver["links"].append(ret)
+        ver['links'].append(ret)
 
         if matches == 0:
             # in the event we've got a new entry; let's just insert it into
