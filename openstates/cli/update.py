@@ -363,54 +363,52 @@ def check_session_list(juris: State) -> set[str]:
     scraper = type(juris).__name__
 
     # if get_session_list is not defined
-    if not hasattr(juris, 'get_session_list'):
-        raise CommandError(f'{scraper}.get_session_list() is not provided')
+    if not hasattr(juris, "get_session_list"):
+        raise CommandError(f"{scraper}.get_session_list() is not provided")
 
     scraped_sessions = juris.get_session_list()
 
     if not scraped_sessions:
-        raise CommandError('no sessions from {}.get_session_list()'.format(scraper))
+        raise CommandError("no sessions from {}.get_session_list()".format(scraper))
 
     active_sessions = set()
     # copy the list to avoid modifying it
     sessions = set(juris.ignored_scraped_sessions)
-    session_identifiers = set(juris.ignored_scraped_sessions)
+
     for session in juris.legislative_sessions:
         sessions.add(session.get("_scraped_name", session["identifier"]))
-        session_identifiers.add(session.get("identifier"))
         if session.get("active") or ("all" in getattr(juris, "backfill", [])):
             active_sessions.add(session.get("identifier"))
-    active_sessions.update(juris.backfill)
+    active_sessions.update(getattr(juris, "backfill", []))
+
     if not active_sessions:
         raise CommandError(f"No active sessions on {scraper}")
 
     unaccounted_sessions = list(set(scraped_sessions) - sessions)
     if unaccounted_sessions:
-        unaccounted_sessions_identifiers = list(set(scraped_sessions) - session_identifiers)
-        if unaccounted_sessions_identifiers:
-            raise CommandError(
-                (
-                    "Session(s) {sessions} were reported by {scraper}.get_session_list() "
-                    "but were not found in {scraper}.legislative_sessions or "
-                    "{scraper}.ignored_scraped_sessions."
-                ).format(sessions=", ".join(unaccounted_sessions), scraper=scraper)
-            )
+        raise CommandError(
+            (
+                "Session(s) {sessions} were reported by {scraper}.get_session_list() "
+                "but were not found in {scraper}.legislative_sessions or "
+                "{scraper}.ignored_scraped_sessions."
+            ).format(sessions=", ".join(unaccounted_sessions), scraper=scraper)
+        )
     stats.write_stats(
         [
             {
-                'metric': 'sessions',
-                'fields': {'count': len(active_sessions)},
-                'tags': {'jurisdiction': scraper, 'session_type': 'active'},
+                "metric": "sessions",
+                "fields": {"count": len(active_sessions)},
+                "tags": {"jurisdiction": scraper, "session_type": "active"},
             },
             {
-                'metric': 'sessions',
-                'fields': {'count': len(unaccounted_sessions)},
-                'tags': {'jurisdiction': scraper, 'session_type': 'unaccounted'},
+                "metric": "sessions",
+                "fields": {"count": len(unaccounted_sessions)},
+                "tags": {"jurisdiction": scraper, "session_type": "unaccounted"},
             },
             {
-                'metric': 'sessions',
-                'fields': {'count': len(juris.ignored_scraped_sessions)},
-                'tags': {'jurisdiction': scraper, 'session_type': 'ignored'},
+                "metric": "sessions",
+                "fields": {"count": len(juris.ignored_scraped_sessions)},
+                "tags": {"jurisdiction": scraper, "session_type": "ignored"},
             },
         ]
     )
