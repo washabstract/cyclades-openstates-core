@@ -48,9 +48,9 @@ class Missing:
 
 
 def validate_roles(
-    person: Person,
-    roles_key: str,
-    retired: bool = False,
+        person: Person,
+        roles_key: str,
+        retired: bool = False,
 ) -> list[str]:
     active = [role for role in getattr(person, roles_key) if role.is_active()]
     if len(active) == 0 and not retired:
@@ -63,9 +63,10 @@ def validate_roles(
 
 
 def validate_roles_key(
-    person: Person,
-    person_type: PersonType,
-    fix: bool,
+        person: Person,
+        person_type: PersonType,
+        fix: bool,
+        ignore_role_warnings: bool,
 ) -> CheckResult:
     resp = CheckResult([], [], [])
     role_issues = validate_roles(
@@ -80,7 +81,7 @@ def validate_roles_key(
         # municipals missing roles is a warning to avoid blocking lint
         if fix:
             resp.fixes = [MOVED_TO_RETIRED]
-        else:
+        elif not ignore_role_warnings:
             resp.warnings.extend(role_issues)
     else:
         resp.errors.extend(role_issues)
@@ -111,7 +112,7 @@ def validate_offices(person: Person) -> list[str]:
     return errors
 
 
-def validate_name(person: Person, person_type: PersonType, fix: bool) -> CheckResult:
+def validate_name(person: Person, person_type: PersonType, fix: bool, ignore_role_warnings: bool) -> CheckResult:
     """some basic checks on a persons name"""
     errors = []
     fixes = []
@@ -155,7 +156,7 @@ _ACTUAL_DISTRICTS_TYPE = defaultdict[str, defaultdict[str, list[str]]]
 
 
 def get_expected_districts(
-    settings: dict[str, dict], abbr: str
+        settings: dict[str, dict], abbr: str
 ) -> _EXPECTED_DISTRICTS_TYPE:
     expected = {}
 
@@ -194,7 +195,7 @@ def get_expected_districts(
 
 
 def compare_districts(
-    expected: _EXPECTED_DISTRICTS_TYPE, actual: _ACTUAL_DISTRICTS_TYPE
+        expected: _EXPECTED_DISTRICTS_TYPE, actual: _ACTUAL_DISTRICTS_TYPE
 ) -> list[str]:
     errors = []
 
@@ -222,9 +223,10 @@ def compare_districts(
 
 
 class Validator:
-    def __init__(self, abbr: str, settings: dict, fix: bool, save_all: bool):
+    def __init__(self, abbr: str, settings: dict, fix: bool, save_all: bool, ignore_role_warnings: bool):
         self.fix = fix
         self.save_all = save_all
+        self.ignore_role_warnings = ignore_role_warnings
         self.expected = get_expected_districts(settings, abbr)
         self.errors: defaultdict[str, list[str]] = defaultdict(list)
         self.warnings: defaultdict[str, list[str]] = defaultdict(list)
@@ -244,13 +246,13 @@ class Validator:
                 raise ValueError(f"invalid municipality id {m}")
 
     def process_validator_result(
-        self,
-        validator_func: typing.Callable[[Person, PersonType, bool], CheckResult],
-        person: Person,
-        person_type: PersonType,
-        original_filename: Path,
+            self,
+            validator_func: typing.Callable[[Person, PersonType, bool, bool], CheckResult],
+            person: Person,
+            person_type: PersonType,
+            original_filename: Path,
     ) -> None:
-        result = validator_func(person, person_type, self.fix)
+        result = validator_func(person, person_type, self.fix, self.ignore_role_warnings)
         self.errors[original_filename.name].extend(result.errors)
         self.warnings[original_filename.name].extend(result.warnings)
         if result.fixes:
@@ -258,10 +260,10 @@ class Validator:
             dump_obj(person, filename=original_filename)
 
     def validate_person(
-        self,
-        data: dict[str, typing.Any],
-        filename: Path,
-        person_type: PersonType,
+            self,
+            data: dict[str, typing.Any],
+            filename: Path,
+            person_type: PersonType,
     ) -> None:
         print_filename = filename.name
         try:
@@ -326,9 +328,9 @@ class Validator:
         errors = []
         for role in person.roles:
             if (
-                role.district
-                and role.district not in self.expected[role.type]
-                and role.district not in self.legacy_districts[role.type]
+                    role.district
+                    and role.district not in self.expected[role.type]
+                    and role.district not in self.legacy_districts[role.type]
             ):
                 errors.append(f"unknown district name: {role.type} {role.district}")
         return errors
