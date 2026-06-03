@@ -1,4 +1,9 @@
 # Changelog
+
+## 6.25.2 - Jun 3, 2026
+* Adds an --ignore-role-warnings flag to people lint CLI to reduce verbosity
+
+## 6.25.1 - May 5, 2026
 * Fixes a syntax error that caused a bug when POSTing data in http-resilience mode, if
   supplying headers or other kwargs.
 
