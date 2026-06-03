@@ -244,7 +244,7 @@ def test_compare_districts_overfill():
 
 
 def test_person_duplicates():
-    v = Validator("ak", {}, False, False)
+    v = Validator("ak", {}, False, False, False)
 
     people = [
         # duplicates across people
@@ -296,7 +296,7 @@ def test_filename_id_test():
         name="Jane Smith",
         roles=[],
     )
-    v = Validator("ak", {}, False, False)
+    v = Validator("ak", {}, False, False, False)
     v.validate_person(person, Path("bad-filename"), PersonType.LEGISLATIVE)
     for err in v.errors["bad-filename"]:
         if "not in filename" in err:
