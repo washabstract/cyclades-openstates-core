@@ -127,7 +127,7 @@ class Summarizer:
                 click.secho(name, bold=True)
                 for type, count in collection.items():
                     click.secho(
-                        f" {type:<25} {count:4d} {count/self.person_count*100:.0f}% "
+                        f" {type:<25} {count:4d} {count / self.person_count * 100:.0f}% "
                     )
             else:
                 click.secho(name + " - none", bold=True)
@@ -251,7 +251,7 @@ def write_csv(files: list[Path], jurisdiction_id: str, output_filename: str) -> 
 
 
 def lint_dir(
-    abbr: str, verbose: bool, municipal: bool, date: str, fix: bool, save_all: bool
+        abbr: str, verbose: bool, municipal: bool, date: str, fix: bool, save_all: bool, ignore_role_warnings: bool
 ) -> int:  # pragma: no cover
     state_dir = get_data_path(abbr)
     legislative_filenames = (state_dir / "legislature").glob("*.yml")
@@ -265,7 +265,7 @@ def lint_dir(
         settings = yaml.safe_load(f)
 
     try:
-        validator = Validator(abbr, settings, fix, save_all)
+        validator = Validator(abbr, settings, fix, save_all, ignore_role_warnings)
     except BadVacancy:
         sys.exit(-1)
 
@@ -398,17 +398,17 @@ def load_directory_to_database(files: list[Path], purge: bool) -> None:
 
 
 def create_person(
-    fname: str,
-    lname: str,
-    name: str,
-    state: str,
-    district: str,
-    party: str,
-    rtype: str,
-    url: str,
-    image: str,
-    email: str,
-    start_date: str,
+        fname: str,
+        lname: str,
+        name: str,
+        state: str,
+        district: str,
+        party: str,
+        rtype: str,
+        url: str,
+        image: str,
+        email: str,
+        start_date: str,
 ) -> None:
     role = Role(
         type=rtype,
@@ -497,17 +497,17 @@ def to_csv(abbreviations: list[str], upload: bool) -> None:
 @click.option("--email", prompt="Email", help="Email")
 @click.option("--start-date", prompt="Start Date", help="Start Date YYYY-MM-DD")
 def new(
-    fname: str,
-    lname: str,
-    name: str,
-    state: str,
-    district: str,
-    party: str,
-    rtype: str,
-    url: str,
-    image: str,
-    email: str,
-    start_date: str,
+        fname: str,
+        lname: str,
+        name: str,
+        state: str,
+        district: str,
+        party: str,
+        rtype: str,
+        url: str,
+        image: str,
+        email: str,
+        start_date: str,
 ) -> None:
     """
     Create a new person record.
@@ -558,11 +558,11 @@ def summarize(abbreviations: list[str], roster: bool) -> None:
 @click.option("--death", is_flag=True)
 @click.option("--vacant", is_flag=True)
 def retire(
-    date: str,
-    filenames: list[str],
-    reason: typing.Optional[str],
-    death: bool,
-    vacant: bool,
+        date: str,
+        filenames: list[str],
+        reason: typing.Optional[str],
+        death: bool,
+        vacant: bool,
 ) -> None:
     """
     Retire a legislator, given END_DATE and FILENAME.
@@ -623,7 +623,7 @@ def sync_images(abbreviations: list[str], skip_existing: bool) -> None:
 @click.option(
     "--save-all/--no-save-all",
     default=False,
-    help="Enable/disable automatic reforamting of YAML.",
+    help="Enable/disable automatic reformatting of YAML.",
 )
 @click.option(
     "--municipal/--no-municipal",
@@ -636,13 +636,19 @@ def sync_images(abbreviations: list[str], skip_existing: bool) -> None:
     default=None,
     help="Lint roles using a certain date instead of today.",
 )
+@click.option(
+    "--ignore-role-warnings/--do-not-ignore-role-warnings",
+    default=False,
+    help="Do not emit warnings for people with no active roles.",
+)
 def lint(
-    abbreviations: list[str],
-    verbose: bool,
-    municipal: bool,
-    date: str,
-    fix: bool,
-    save_all: bool,
+        abbreviations: list[str],
+        verbose: bool,
+        municipal: bool,
+        date: str,
+        fix: bool,
+        save_all: bool,
+        ignore_role_warnings: bool,
 ) -> None:
     """
     Lint YAML files.
@@ -656,7 +662,7 @@ def lint(
 
     for abbr in abbreviations:
         click.secho("==== {} ====".format(abbr), bold=True)
-        error_count += lint_dir(abbr, verbose, municipal, date, fix, save_all)
+        error_count += lint_dir(abbr, verbose, municipal, date, fix, save_all, ignore_role_warnings)
 
     if error_count:
         click.secho(f"exiting with {error_count} errors", fg="red")
@@ -749,8 +755,8 @@ def merge(abbr: str, input_dir: str, retirement: str, reset_offices: bool) -> No
     existing_people: list[Person] = []
     directory = get_data_path(abbr)
     for filename in itertools.chain(
-        directory.glob("legislature/*.yml"),
-        directory.glob("retired/*.yml"),
+            directory.glob("legislature/*.yml"),
+            directory.glob("retired/*.yml"),
     ):
         existing_people.append(Person.load_yaml(filename))
 
