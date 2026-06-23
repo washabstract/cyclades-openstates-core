@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cyclades"
-version = "6.25.1"
+version = "6.25.2"
 packages = [
     { include = "openstates" },
     { include = "openstates/**/*.py" }

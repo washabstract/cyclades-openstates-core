@@ -54,21 +54,21 @@ EXAMPLE_OCD_ORG_ID = "ocd-organization/00001111-2222-3333-aaaa-444455556666"
     ],
 )
 def test_validate_name_errors(person, expected):
-    assert validate_name(person, PersonType.LEGISLATIVE, fix=False).errors == expected
-    assert validate_name(person, PersonType.LEGISLATIVE, fix=False).warnings == []
-    assert validate_name(person, PersonType.LEGISLATIVE, fix=False).fixes == []
+    assert validate_name(person, PersonType.LEGISLATIVE, fix=False, ignore_role_warnings=False).errors == expected
+    assert validate_name(person, PersonType.LEGISLATIVE, fix=False, ignore_role_warnings=False).warnings == []
+    assert validate_name(person, PersonType.LEGISLATIVE, fix=False, ignore_role_warnings=False).fixes == []
 
 
 def test_validate_name_fixes():
     person = Person(id=EXAMPLE_OCD_PERSON_ID, name="Phillip Swoozle", roles=[])
-    result = validate_name(person, PersonType.LEGISLATIVE, fix=True)
+    result = validate_name(person, PersonType.LEGISLATIVE, fix=True, ignore_role_warnings=False)
     assert result.errors == []
     assert len(result.fixes) == 2
     assert person.given_name == "Phillip"
     assert person.family_name == "Swoozle"
 
     # no fixes on an OK name
-    result = validate_name(person, PersonType.LEGISLATIVE, fix=True)
+    result = validate_name(person, PersonType.LEGISLATIVE, fix=True, ignore_role_warnings=False)
     assert result.errors == result.fixes == []
 
 
@@ -244,7 +244,7 @@ def test_compare_districts_overfill():
 
 
 def test_person_duplicates():
-    v = Validator("ak", {}, False, False)
+    v = Validator("ak", {}, False, False, False)
 
     people = [
         # duplicates across people
@@ -296,7 +296,7 @@ def test_filename_id_test():
         name="Jane Smith",
         roles=[],
     )
-    v = Validator("ak", {}, False, False)
+    v = Validator("ak", {}, False, False, False)
     v.validate_person(person, Path("bad-filename"), PersonType.LEGISLATIVE)
     for err in v.errors["bad-filename"]:
         if "not in filename" in err:
